@@ -9,6 +9,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <ctype.h>
+#include <stdbool.h>
 #include "azure_c_shared_utility/httpapi.h"
 #include "azure_c_shared_utility/httpheaders.h"
 #include "azure_c_shared_utility/crt_abstractions.h"
@@ -16,11 +17,11 @@
 #include "azure_c_shared_utility/xio.h"
 #include "azure_c_shared_utility/platform.h"
 #include "azure_c_shared_utility/tlsio.h"
-#include "azure_c_shared_utility/threadapi.h"
-#include <string.h>
+#include "azure_c_shared_utility/strings.h"
+//#include <string.h>
 
-#define MAX_HOSTNAME     64
-#define TEMP_BUFFER_SIZE 4096
+#define MAX_HOSTNAME_LEN        255
+#define TEMP_BUFFER_SIZE        4096
 
 #define CHAR_COUNT(A)   (sizeof(A) - 1)
 
@@ -36,359 +37,207 @@ typedef enum SEND_ALL_RESULT_TAG
 
 typedef struct HTTP_HANDLE_DATA_TAG
 {
-    char            host[MAX_HOSTNAME];
-    char*           certificate;
-    XIO_HANDLE      xio_handle;
-    size_t          received_bytes_count;
+    char* hostname;
+    char* certificate;
+    XIO_HANDLE xio_handle;
+    ON_EXECUTE_COMPLETE fn_execute_complete;
+    void* execute_ctx;
+    size_t received_bytes_count;
     unsigned char*  received_bytes;
     SEND_ALL_RESULT send_all_result;
-    unsigned int    is_io_error : 1;
-    unsigned int    is_connected : 1;
+    unsigned int is_io_error : 1;
+    unsigned int is_connected : 1;
+    bool logTrace;
 } HTTP_HANDLE_DATA;
 
-HTTPAPI_RESULT HTTPAPI_Init(void)
+static void getLogTime(char* timeResult, size_t len)
 {
-    return HTTPAPI_OK;
-}
-
-void HTTPAPI_Deinit(void)
-{
-}
-
-HTTP_HANDLE HTTPAPI_CreateConnection(const char* hostName)
-{
-    HTTP_HANDLE_DATA* handle = NULL;
-
-    if (hostName)
+    if (timeResult != NULL)
     {
-        handle = (HTTP_HANDLE_DATA*)malloc(sizeof(HTTP_HANDLE_DATA));
-        if (handle != NULL)
+        time_t localTime = time(NULL);
+        struct tm* tmInfo = localtime(&localTime);
+        if (strftime(timeResult, len, "%H:%M:%S", tmInfo) == 0)
         {
-            if (strcpy_s(handle->host, MAX_HOSTNAME, hostName) != 0)
-            {
-                LogError("HTTPAPI_CreateConnection::Could not strcpy_s");
-                free(handle);
-                handle = NULL;
-            }
-            else
-            {
-                TLSIO_CONFIG tlsio_config = { hostName, 443 };
-                handle->xio_handle = xio_create(platform_get_default_tlsio(), (void*)&tlsio_config);
-                if (handle->xio_handle == NULL)
-                {
-                    LogError("HTTPAPI_CreateConnection::xio_create failed");
-                    free(handle->host);
-                    free(handle);
-                    handle = NULL;
-                }
-                else
-                {
-                    handle->is_connected = 0;
-                    handle->is_io_error = 0;
-                    handle->received_bytes_count = 0;
-                    handle->received_bytes = NULL;
-                    handle->send_all_result = SEND_ALL_RESULT_NOT_STARTED;
-                    handle->certificate = NULL;
-                }
-            }
+            timeResult[0] = '\0';
         }
-    }
-    else
-    {
-        LogInfo("HTTPAPI_CreateConnection:: null hostName parameter");
-    }
-
-    return (HTTP_HANDLE)handle;
-}
-
-void HTTPAPI_CloseConnection(HTTP_HANDLE handle)
-{
-    HTTP_HANDLE_DATA* h = (HTTP_HANDLE_DATA*)handle;
-
-    if (h)
-    {
-        if (h->xio_handle != NULL)
-        {
-            LogInfo("HTTPAPI_CloseConnection xio_destroy(); to %s", h->host);
-            xio_destroy(h->xio_handle);
-        }
-
-        if (h->certificate)
-        {
-            free(h->certificate);
-        }
-
-        free(h);
     }
 }
 
 static void on_io_open_complete(void* context, IO_OPEN_RESULT open_result)
 {
-    HTTP_HANDLE_DATA* h = (HTTP_HANDLE_DATA*)context;
-    if (open_result == IO_OPEN_OK)
+    HTTP_HANDLE_DATA* http_data = (HTTP_HANDLE_DATA*)context;
+    if (http_data != NULL)
     {
-        h->is_connected = 1;
-        h->is_io_error = 0;
-    }
-    else
-    {
-        h->is_io_error = 1;
-    }
-}
-
-static int my_strnicmp(const char* s1, const char* s2, size_t n)
-{
-    size_t i;
-    int result = 0;
-
-    for (i = 0; i < n; i++)
-    {
-        /* compute the difference between the chars */
-        result = tolower(s1[i]) - tolower(s2[i]);
-
-        /* break if we have a difference ... */
-        if ((result != 0) ||
-            /* ... or if we got to the end of one the strings */
-            (s1[i] == '\0') || (s2[i] == '\0'))
+        if (open_result == IO_OPEN_OK)
         {
-            break;
+            http_data->is_connected = 1;
+            http_data->is_io_error = 0;
+        }
+        else
+        {
+            http_data->is_io_error = 1;
         }
     }
-
-    return result;
 }
 
-static int my_stricmp(const char* s1, const char* s2)
+static void on_bytes_recv(void* context, const unsigned char* buffer, size_t len)
 {
-    size_t i = 0;
-
-    while ((s1[i] != '\0') && (s2[i] != '\0'))
+    HTTP_HANDLE_DATA* http_data = (HTTP_HANDLE_DATA*)context;
+    if (http_data != NULL)
     {
-        /* break if we have a difference ... */
-        if (tolower(s1[i]) != tolower(s2[i]))
+        /* Here we got some bytes so we'll buffer them so the receive functions can consumer it */
+        unsigned char* new_received_bytes = (unsigned char*)realloc(http_data->received_bytes, http_data->received_bytes_count + len);
+        if (new_received_bytes == NULL)
         {
-            break;
+            http_data->is_io_error = 1;
+            LogError("on_bytes_received: Error allocating memory for received data");
         }
-
-        i++;
-    }
-
-    /* if we broke because we are at end of string this will yield 0 */
-    /* if we broke because there was a difference this will yield non-zero  */
-    return tolower(s1[i]) - tolower(s2[i]);
-}
-
-static void on_bytes_received(void* context, const unsigned char* buffer, size_t size)
-{
-    HTTP_HANDLE_DATA* h = (HTTP_HANDLE_DATA*)context;
-
-    /* Here we got some bytes so we'll buffer them so the receive functions can consumer it */
-    unsigned char* new_received_bytes = (unsigned char*)realloc(h->received_bytes, h->received_bytes_count + size);
-    if (new_received_bytes == NULL)
-    {
-        h->is_io_error = 1;
-        LogError("on_bytes_received: Error allocating memory for received data");
-    }
-    else
-    {
-        h->received_bytes = new_received_bytes;
-        (void)memcpy(h->received_bytes + h->received_bytes_count, buffer, size);
-        h->received_bytes_count += size;
+        else
+        {
+            http_data->received_bytes = new_received_bytes;
+            (void)memcpy(http_data->received_bytes + http_data->received_bytes_count, buffer, len);
+            http_data->received_bytes_count += len;
+        }
     }
 }
 
 static void on_io_error(void* context)
 {
-    HTTP_HANDLE_DATA* h = (HTTP_HANDLE_DATA*)context;
-    h->is_io_error = 1;
-    LogError("on_io_error: Error signalled by underlying IO");
-}
-
-static int conn_receive(HTTP_HANDLE_DATA* http_instance, char* buffer, int count)
-{
-    int result = 0;
-
-    if (count < 0)
+    HTTP_HANDLE_DATA* http_data = (HTTP_HANDLE_DATA*)context;
+    if (http_data != NULL)
     {
-        result = -1;
+        http_data->is_io_error = 1;
+        LogError("on_io_error: Error signalled by underlying IO");
     }
-    else
-    {
-        while (result < count)
-        {
-            xio_dowork(http_instance->xio_handle);
-
-            /* if any error was detected while receiving then simply break and report it */
-            if (http_instance->is_io_error != 0)
-            {
-                result = -1;
-                break;
-            }
-
-            if (http_instance->received_bytes_count >= (size_t)count)
-            {
-                /* Consuming bytes from the receive buffer */
-                (void)memcpy(buffer, http_instance->received_bytes, count);
-                (void)memmove(http_instance->received_bytes, http_instance->received_bytes + count, http_instance->received_bytes_count - count);
-                http_instance->received_bytes_count -= count;
-
-                /* we're not reallocating at each consumption so that we don't trash due to byte by byte consumption */
-                if (http_instance->received_bytes_count == 0)
-                {
-                    free(http_instance->received_bytes);
-                    http_instance->received_bytes = NULL;
-                }
-
-                result = count;
-                break;
-            }
-
-            ThreadAPI_Sleep(1);
-        }
-    }
-
-    return result;
 }
 
 static void on_send_complete(void* context, IO_SEND_RESULT send_result)
 {
-    /* If a send is complete we'll simply signal this by changing the send all state */
-    HTTP_HANDLE_DATA* http_instance = (HTTP_HANDLE_DATA*)context;
-    if (send_result == IO_SEND_OK)
-    {
-        http_instance->send_all_result = SEND_ALL_RESULT_OK;
-    }
-    else
-    {
-        http_instance->send_all_result = SEND_ALL_RESULT_ERROR;
-    }
+    (void)context;
+    //printf("Sending Data has been complete. Result %d\r\n", send_result);
 }
 
-static int conn_send_all(HTTP_HANDLE_DATA* http_instance, char* buffer, int count)
+static int write_http_line(HTTP_HANDLE_DATA* http_data, const char* writeText)
 {
     int result;
-
-    if (count < 0)
+    if (xio_send(http_data->xio_handle, writeText, strlen(writeText), sendCompleteCb, NULL) != 0)
     {
-        result = -1;
+        result = __LINE__;
     }
     else
     {
-        http_instance->send_all_result = SEND_ALL_RESULT_PENDING;
-        if (xio_send(http_instance->xio_handle, buffer, count, on_send_complete, http_instance) != 0)
+        result = 0;
+        if (http_data->logTrace)
         {
-            result = -1;
-        }
-        else
-        {
-            /* We have to loop in here until all bytes are sent or we encounter an error. */
-            while (1)
-            {
-                xio_dowork(http_instance->xio_handle);
+            char timeResult[TIME_MAX_BUFFER];
+            getLogTime(timeResult, TIME_MAX_BUFFER);
+            LOG(LOG_INFO, LOG_LINE, "%s", timeResult);
 
-                /* If we got an error signalled from the underlying IO we simply report it up */
-                if (http_instance->is_io_error)
-                {
-                    http_instance->send_all_result = SEND_ALL_RESULT_ERROR;
-                    break;
-                }
-
-                if (http_instance->send_all_result != SEND_ALL_RESULT_PENDING)
-                {
-                    break;
-                }
-
-                /* We yield the CPU for a bit so others can do their work */
-                ThreadAPI_Sleep(1);
-            }
-
-            /* The send_all_result indicates what is the status for the send operation.
-               Not started - means nothing should happen since no send was started
-               Pending - a send was started, but it is still being carried out 
-               Ok - Send complete
-               Error - error */
-            switch (http_instance->send_all_result)
-            {
-                default:
-                case SEND_ALL_RESULT_NOT_STARTED:
-                    result = -1;
-                    break;
-
-                case SEND_ALL_RESULT_OK:
-                    result = count;
-                    break;
-
-                case SEND_ALL_RESULT_ERROR:
-                    result = -1;
-                    break;
-            }
+            LOG(LOG_TRACE, LOG_LINE, "%s", writeText);
         }
     }
-
     return result;
 }
 
-static int readLine(HTTP_HANDLE_DATA* http_instance, char* buf, const size_t size)
+static int send_http_data(HTTP_HANDLE_DATA* http_data, HTTPAPI_REQUEST_TYPE requestType, const char* relativePath,
+    HTTP_HEADERS_HANDLE httpHeadersHandle, size_t contentLength, bool sendChunked)
 {
-    // reads until \r\n is encountered. writes in buf all the characters
-    char* p = buf;
-    char  c;
-    if (conn_receive(http_instance, &c, 1) < 0)
-        return -1;
-    while (c != '\r') {
-        if ((p - buf + 1) >= (int)size)
-            return -1;
-        *p++ = c;
-        if (conn_receive(http_instance, &c, 1) < 0)
-            return -1;
+    int result;
+    STRING_HANDLE httpData = ConstructHttpData(requestType, relativePath, httpHeadersHandle, contentLength, sendChunked);
+    if (httpData == NULL)
+    {
+        result = __LINE__;
     }
-    *p = 0;
-    if (conn_receive(http_instance, &c, 1) < 0 || c != '\n') // skip \n
-        return -1;
-    return p - buf;
+    else
+    {
+        if (WriteTextLine(http_data, STRING_c_str(httpData)) != 0)
+        {
+            result = __LINE__;
+            LogError("Failure writing request buffer");
+        }
+        else
+        {
+            result = 0;
+        }
+        STRING_delete(httpData);
+    }
+    return result;
 }
 
-static int readChunk(HTTP_HANDLE_DATA* http_instance, char* buf, size_t size)
+HTTP_HANDLE HTTPAPI_CreateConnection(const char* hostName)
 {
-    size_t cur, offset;
-
-    // read content with specified length, even if it is received
-    // only in chunks due to fragmentation in the networking layer.
-    // returns -1 in case of error.
-    offset = 0;
-    while (size > 0)
-    {
-        cur = conn_receive(http_instance, buf + offset, size);
-
-        // end of stream reached
-        if (cur == 0)
-            return offset;
-
-        // read cur bytes (might be less than requested)
-        size -= cur;
-        offset += cur;
-    }
-
-    return offset;
+    (void)hostName;
+    return NULL;
 }
 
-static int skipN(HTTP_HANDLE_DATA* http_instance, size_t n, char* buf, size_t size)
+HTTP_HANDLE HTTPAPI_CreateConnection_new(XIO_HANDLE io_handle, const char* hostName)
 {
-    size_t org = n;
-    // read and abandon response content with specified length
-    // returns -1 in case of error.
-    while (n > size)
+    HTTP_HANDLE_DATA* http_data = NULL;
+    if (hostName == NULL || io_handle == NULL)
     {
-        if (readChunk(http_instance, (char*)buf, size) < 0)
-            return -1;
-
-        n -= size;
+        LogInfo("Failure: invalid parameter was NULL");
     }
+    else if (strlen(hostName) > MAX_HOSTNAME_LEN)
+    {
+        LogInfo("Failure: Host name length is too long");
+    }
+    else
+    {
+        http_data = (HTTP_HANDLE_DATA*)malloc(sizeof(HTTP_HANDLE_DATA));
+        if (http_data == NULL)
+        {
+            LogInfo("failed allocating HTTP_HANDLE_DATA");
+        }
+        else
+        {
+            http_data->xio_handle = io_handle;
 
-    if (readChunk(http_instance, (char*)buf, n) < 0)
-        return -1;
+            if (mallocAndStrcpy_s(&http_data->hostname, hostName) != 0)
+            {
+                LogError("Failure opening xio connection");
+                free(http_data);
+                http_data = NULL;
+            }
+            else if (xio_open(http_data->xio_handle, on_io_open_complete, http_data, on_bytes_recv, http_data, on_io_error, http_data) != 0)
+            {
+                LogError("Failure allocating hostname");
+                free(http_data->hostname);
+                free(http_data);
+                http_data = NULL;
+            }
+            else
+            {
+                http_data->is_connected = 0;
+                http_data->is_io_error = 0;
+                http_data->received_bytes_count = 0;
+                http_data->received_bytes = NULL;
+                //handle->send_all_result = SEND_ALL_RESULT_NOT_STARTED;
+                http_data->certificate = NULL;
+            }
+        }
+    }
+    return (HTTP_HANDLE)http_data;
+}
 
-    return org;
+void HTTPAPI_CloseConnection(HTTP_HANDLE handle)
+{
+    HTTP_HANDLE_DATA* http_data = (HTTP_HANDLE_DATA*)handle;
+    if (http_data != NULL)
+    {
+        if (http_data->xio_handle != NULL)
+        {
+            (int)xio_close(http_data->xio_handle, NULL, NULL);
+        }
+        if (http_data->certificate)
+        {
+            free(http_data->certificate);
+        }
+        if (http_data->hostname)
+        {
+            free(http_data->hostname);
+        }
+        free(http_data);
+    }
 }
 
 //Note: This function assumes that "Host:" and "Content-Length:" headers are setup
@@ -398,9 +247,17 @@ HTTPAPI_RESULT HTTPAPI_ExecuteRequest(HTTP_HANDLE handle, HTTPAPI_REQUEST_TYPE r
     size_t contentLength, unsigned int* statusCode,
     HTTP_HEADERS_HANDLE responseHeadersHandle, BUFFER_HANDLE responseContent)
 {
+    (void)handle;
+    (void)requestType;
+    (void)relativePath;
+    (void)httpHeadersHandle;
+    (void)content;
+    (void)contentLength;
+    (void)statusCode;
+    (void)responseHeadersHandle;(void)responseContent;
 
-    HTTPAPI_RESULT result;
-    size_t  headersCount;
+    HTTPAPI_RESULT result = HTTPAPI_ERROR;
+    /*size_t  headersCount;
     char    buf[TEMP_BUFFER_SIZE];
     int     ret;
     size_t  bodyLength = 0;
@@ -431,7 +288,7 @@ HTTPAPI_RESULT HTTPAPI_ExecuteRequest(HTTP_HANDLE handle, HTTPAPI_REQUEST_TYPE r
     {
         // Load the certificate
         if ((httpHandle->certificate != NULL) &&
-			(xio_setoption(httpHandle->xio_handle, "TrustedCerts", httpHandle->certificate) != 0))
+            (xio_setoption(httpHandle->xio_handle, "TrustedCerts", httpHandle->certificate) != 0))
         {
             result = HTTPAPI_ERROR;
             LogError("Could not load certificate (result = %s)", ENUM_TO_STRING(HTTPAPI_RESULT, result));
@@ -717,9 +574,279 @@ exit:
     {
         xio_close(handle->xio_handle, NULL, NULL);
         handle->is_connected = 0;
+    }*/
+
+    return result;
+}
+
+HTTPAPI_RESULT HTTPAPI_ExecuteRequestAsync(HTTP_HANDLE handle, HTTPAPI_REQUEST_TYPE requestType, const char* relativePath, HTTP_HEADERS_HANDLE httpHeadersHandle,
+    const unsigned char* content, size_t contentLength, ON_EXECUTE_COMPLETE on_send_complete, void* callback_context)
+{
+    HTTPAPI_RESULT result;
+
+    if (handle == NULL || relativePath == NULL ||
+        (content != NULL && contentLength == 0) || (content == NULL && contentLength != 0))
+    {
+        result = HTTPAPI_INVALID_ARG;
+    }
+    else
+    {
+        HTTP_HANDLE_DATA* http_data = (HTTP_HANDLE_DATA*)handle;
+    }
+    return result;
+}
+
+void HTTPAPI_DoWork(HTTP_HANDLE handle)
+{
+
+}
+
+static int my_strnicmp(const char* s1, const char* s2, size_t n)
+{
+    size_t i;
+    int result = 0;
+
+    for (i = 0; i < n; i++)
+    {
+        /* compute the difference between the chars */
+        result = tolower(s1[i]) - tolower(s2[i]);
+
+        /* break if we have a difference ... */
+        if ((result != 0) ||
+            /* ... or if we got to the end of one the strings */
+            (s1[i] == '\0') || (s2[i] == '\0'))
+        {
+            break;
+        }
     }
 
     return result;
+}
+
+static int my_stricmp(const char* s1, const char* s2)
+{
+    size_t i = 0;
+
+    while ((s1[i] != '\0') && (s2[i] != '\0'))
+    {
+        /* break if we have a difference ... */
+        if (tolower(s1[i]) != tolower(s2[i]))
+        {
+            break;
+        }
+
+        i++;
+    }
+
+    /* if we broke because we are at end of string this will yield 0 */
+    /* if we broke because there was a difference this will yield non-zero  */
+    return tolower(s1[i]) - tolower(s2[i]);
+}
+
+static void on_bytes_received(void* context, const unsigned char* buffer, size_t size)
+{
+    HTTP_HANDLE_DATA* h = (HTTP_HANDLE_DATA*)context;
+
+    /* Here we got some bytes so we'll buffer them so the receive functions can consumer it */
+    unsigned char* new_received_bytes = (unsigned char*)realloc(h->received_bytes, h->received_bytes_count + size);
+    if (new_received_bytes == NULL)
+    {
+        h->is_io_error = 1;
+        LogError("on_bytes_received: Error allocating memory for received data");
+    }
+    else
+    {
+        h->received_bytes = new_received_bytes;
+        (void)memcpy(h->received_bytes + h->received_bytes_count, buffer, size);
+        h->received_bytes_count += size;
+    }
+}
+
+static int conn_receive(HTTP_HANDLE_DATA* http_instance, char* buffer, int count)
+{
+    int result = 0;
+
+    if (count < 0)
+    {
+        result = -1;
+    }
+    else
+    {
+        while (result < count)
+        {
+            xio_dowork(http_instance->xio_handle);
+
+            /* if any error was detected while receiving then simply break and report it */
+            if (http_instance->is_io_error != 0)
+            {
+                result = -1;
+                break;
+            }
+
+            if (http_instance->received_bytes_count >= (size_t)count)
+            {
+                /* Consuming bytes from the receive buffer */
+                (void)memcpy(buffer, http_instance->received_bytes, count);
+                (void)memmove(http_instance->received_bytes, http_instance->received_bytes + count, http_instance->received_bytes_count - count);
+                http_instance->received_bytes_count -= count;
+
+                /* we're not reallocating at each consumption so that we don't trash due to byte by byte consumption */
+                if (http_instance->received_bytes_count == 0)
+                {
+                    free(http_instance->received_bytes);
+                    http_instance->received_bytes = NULL;
+                }
+
+                result = count;
+                break;
+            }
+
+            ThreadAPI_Sleep(1);
+        }
+    }
+
+    return result;
+}
+
+static void on_send_complete(void* context, IO_SEND_RESULT send_result)
+{
+    /* If a send is complete we'll simply signal this by changing the send all state */
+    HTTP_HANDLE_DATA* http_instance = (HTTP_HANDLE_DATA*)context;
+    if (send_result == IO_SEND_OK)
+    {
+        http_instance->send_all_result = SEND_ALL_RESULT_OK;
+    }
+    else
+    {
+        http_instance->send_all_result = SEND_ALL_RESULT_ERROR;
+    }
+}
+
+static int conn_send_all(HTTP_HANDLE_DATA* http_instance, char* buffer, int count)
+{
+    int result;
+
+    if (count < 0)
+    {
+        result = -1;
+    }
+    else
+    {
+        http_instance->send_all_result = SEND_ALL_RESULT_PENDING;
+        if (xio_send(http_instance->xio_handle, buffer, count, on_send_complete, http_instance) != 0)
+        {
+            result = -1;
+        }
+        else
+        {
+            /* We have to loop in here until all bytes are sent or we encounter an error. */
+            while (1)
+            {
+                xio_dowork(http_instance->xio_handle);
+
+                /* If we got an error signalled from the underlying IO we simply report it up */
+                if (http_instance->is_io_error)
+                {
+                    http_instance->send_all_result = SEND_ALL_RESULT_ERROR;
+                    break;
+                }
+
+                if (http_instance->send_all_result != SEND_ALL_RESULT_PENDING)
+                {
+                    break;
+                }
+
+                /* We yield the CPU for a bit so others can do their work */
+                ThreadAPI_Sleep(1);
+            }
+
+            /* The send_all_result indicates what is the status for the send operation.
+               Not started - means nothing should happen since no send was started
+               Pending - a send was started, but it is still being carried out 
+               Ok - Send complete
+               Error - error */
+            switch (http_instance->send_all_result)
+            {
+                default:
+                case SEND_ALL_RESULT_NOT_STARTED:
+                    result = -1;
+                    break;
+
+                case SEND_ALL_RESULT_OK:
+                    result = count;
+                    break;
+
+                case SEND_ALL_RESULT_ERROR:
+                    result = -1;
+                    break;
+            }
+        }
+    }
+
+    return result;
+}
+
+static int readLine(HTTP_HANDLE_DATA* http_instance, char* buf, const size_t size)
+{
+    // reads until \r\n is encountered. writes in buf all the characters
+    char* p = buf;
+    char  c;
+    if (conn_receive(http_instance, &c, 1) < 0)
+        return -1;
+    while (c != '\r') {
+        if ((p - buf + 1) >= (int)size)
+            return -1;
+        *p++ = c;
+        if (conn_receive(http_instance, &c, 1) < 0)
+            return -1;
+    }
+    *p = 0;
+    if (conn_receive(http_instance, &c, 1) < 0 || c != '\n') // skip \n
+        return -1;
+    return p - buf;
+}
+
+static int readChunk(HTTP_HANDLE_DATA* http_instance, char* buf, size_t size)
+{
+    size_t cur, offset;
+
+    // read content with specified length, even if it is received
+    // only in chunks due to fragmentation in the networking layer.
+    // returns -1 in case of error.
+    offset = 0;
+    while (size > 0)
+    {
+        cur = conn_receive(http_instance, buf + offset, size);
+
+        // end of stream reached
+        if (cur == 0)
+            return offset;
+
+        // read cur bytes (might be less than requested)
+        size -= cur;
+        offset += cur;
+    }
+
+    return offset;
+}
+
+static int skipN(HTTP_HANDLE_DATA* http_instance, size_t n, char* buf, size_t size)
+{
+    size_t org = n;
+    // read and abandon response content with specified length
+    // returns -1 in case of error.
+    while (n > size)
+    {
+        if (readChunk(http_instance, (char*)buf, size) < 0)
+            return -1;
+
+        n -= size;
+    }
+
+    if (readChunk(http_instance, (char*)buf, n) < 0)
+        return -1;
+
+    return org;
 }
 
 HTTPAPI_RESULT HTTPAPI_SetOption(HTTP_HANDLE handle, const char* optionName, const void* value)

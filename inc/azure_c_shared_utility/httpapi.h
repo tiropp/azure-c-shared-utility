@@ -17,6 +17,7 @@
 #include "azure_c_shared_utility/macro_utils.h"
 #include "azure_c_shared_utility/buffer_.h"
 #include "azure_c_shared_utility/umock_c_prod.h"
+#include "azure_c_shared_utility/xio.h"
 
 #ifdef __cplusplus
 #include <cstddef>
@@ -27,6 +28,8 @@ extern "C" {
 
 typedef struct HTTP_HANDLE_DATA_TAG* HTTP_HANDLE;
 
+typedef void(*ON_EXECUTE_COMPLETE)(void* callback_context, unsigned int statusCode, HTTP_HEADERS_HANDLE responseHeadersHandle, BUFFER_HANDLE responseContent);
+
 #define AMBIGUOUS_STATUS_CODE           (300)
 
 #define HTTPAPI_RESULT_VALUES                \
@@ -35,20 +38,20 @@ HTTPAPI_INVALID_ARG,                         \
 HTTPAPI_ERROR,                               \
 HTTPAPI_OPEN_REQUEST_FAILED,                 \
 HTTPAPI_SET_OPTION_FAILED,                   \
+HTTPAPI_ALREADY_INIT,                        \
+HTTPAPI_SET_X509_FAILURE,                    \
+HTTPAPI_SET_TIMEOUTS_FAILED,                 \
 HTTPAPI_SEND_REQUEST_FAILED,                 \
 HTTPAPI_RECEIVE_RESPONSE_FAILED,             \
 HTTPAPI_QUERY_HEADERS_FAILED,                \
 HTTPAPI_QUERY_DATA_AVAILABLE_FAILED,         \
 HTTPAPI_READ_DATA_FAILED,                    \
-HTTPAPI_ALREADY_INIT,                        \
 HTTPAPI_NOT_INIT,                            \
 HTTPAPI_HTTP_HEADERS_FAILED,                 \
 HTTPAPI_STRING_PROCESSING_ERROR,             \
 HTTPAPI_ALLOC_FAILED,                        \
 HTTPAPI_INIT_FAILED,                         \
-HTTPAPI_INSUFFICIENT_RESPONSE_BUFFER,        \
-HTTPAPI_SET_X509_FAILURE,                    \
-HTTPAPI_SET_TIMEOUTS_FAILED                  \
+HTTPAPI_INSUFFICIENT_RESPONSE_BUFFER         \
 
 /** @brief Enumeration specifying the possible return values for the APIs in  
  *		   this module.
@@ -95,6 +98,8 @@ MOCKABLE_FUNCTION(, void, HTTPAPI_Deinit);
  * 			case an error occurs.
  */
 MOCKABLE_FUNCTION(, HTTP_HANDLE, HTTPAPI_CreateConnection, const char*, hostName);
+
+MOCKABLE_FUNCTION(, HTTP_HANDLE, HTTPAPI_CreateConnection_new, XIO_HANDLE, io, const char*, hostName);
 
 /**
  * @brief	Closes a connection created with ::HTTPAPI_CreateConnection.
@@ -158,6 +163,12 @@ MOCKABLE_FUNCTION(, HTTPAPI_RESULT, HTTPAPI_ExecuteRequest, HTTP_HANDLE, handle,
                                              HTTP_HEADERS_HANDLE, httpHeadersHandle, const unsigned char*, content,
                                              size_t, contentLength, unsigned int*, statusCode,
                                              HTTP_HEADERS_HANDLE, responseHeadersHandle, BUFFER_HANDLE, responseContent);
+
+MOCKABLE_FUNCTION(, HTTPAPI_RESULT, HTTPAPI_ExecuteRequestAsync, HTTP_HANDLE, handle, HTTPAPI_REQUEST_TYPE, requestType, const char*, relativePath,
+    HTTP_HEADERS_HANDLE, httpHeadersHandle, const unsigned char*, content,
+    size_t, contentLength, ON_EXECUTE_COMPLETE, on_send_complete, void*, callback_context);
+
+MOCKABLE_FUNCTION(, void, HTTPAPI_DoWork, HTTP_HANDLE, handle);
 
 /**
  * @brief	Sets the option named @p optionName bearing the value
