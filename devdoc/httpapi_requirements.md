@@ -10,10 +10,10 @@ Hostname: https://tools.ietf.org/html/rfc1035.pdf
 100 Continue: https://tools.ietf.org/pdf/rfc7231.pdf
 Proxy: https://tools.ietf.org/html/rfc7235.pdf
 
-## RFC 7230 features not yet supported
-6.3.0 Persistent Connections  
+## RFC features to be implemented soon
+(rfc7230) 6.3 Persistent Connections  
 (rfc7231) 6.2.1 100 Continue Response  
-14.33 Proxy Authentication  
+(rfc7235) 3.2 Proxy Authentication  
 
 ##Exposed API
 ```c

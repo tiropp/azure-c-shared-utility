@@ -33,6 +33,8 @@ void my_gballoc_free(void* ptr)
 
 TEST_DEFINE_ENUM_TYPE(HTTPAPI_RESULT, HTTPAPI_RESULT_VALUES)
 
+static const XIO_HANDLE TEST_IO_HANDLE = (XIO_HANDLE)0x11;
+
 static TEST_MUTEX_HANDLE test_serialize_mutex;
 
 static bool malloc_will_fail = false;
@@ -85,10 +87,10 @@ TEST_FUNCTION_CLEANUP(method_cleanup)
 TEST_FUNCTION(httpapi_CreateConnection_hostname_NULL_fail)
 {
     //arrange
-    HTTP_HANDLE handle = NULL;
+    HTTP_HANDLE handle;
 
     //act
-    handle = HTTPAPI_CreateConnection(NULL);
+    handle = HTTPAPI_CreateConnection_new(TEST_IO_HANDLE, NULL);
 
     //assert
     ASSERT_IS_NULL(handle);
