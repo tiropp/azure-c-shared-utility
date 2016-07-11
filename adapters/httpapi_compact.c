@@ -20,9 +20,9 @@
 #include "azure_c_shared_utility/strings.h"
 //#include <string.h>
 
-#define MAX_HOSTNAME_LEN        255
+#define MAX_HOSTNAME_LEN        65
 #define TEMP_BUFFER_SIZE        4096
-#define TIME_MAX_BUFFER     16
+#define TIME_MAX_BUFFER         16
 
 static const char* HTTP_REQUEST_LINE_FMT = "%s %s HTTP/1.1\r\n";
 static const char* HTTP_CONTENT_LEN = "Content-Length";
@@ -274,114 +274,117 @@ static void on_io_open_complete(void* context, IO_OPEN_RESULT open_result)
 
 static void on_bytes_recv(void* context, const unsigned char* buffer, size_t len)
 {
-    HTTP_CLIENT_HANDLE_DATA* data = (HTTP_CLIENT_HANDLE_DATA*)context;
+    HTTP_HANDLE_DATA* http_data = (HTTP_HANDLE_DATA*)context;
     size_t index = 0;
+    HTTPAPI_RESULT execute_result;
 
-    if (data != NULL && buffer != NULL && len > 0 && data->recvMsg.recvState != state_error)
+    if (http_data != NULL && buffer != NULL && len > 0 && http_data->recvMsg.recvState != state_error)
     {
-        if (data->recvMsg.recvState == state_initial)
+        if (http_data->recvMsg.recvState == state_initial)
         {
-            if (data->recvMsg.respHeader == NULL)
+            if (http_data->recvMsg.respHeader == NULL)
             {
-                data->recvMsg.respHeader = HTTPHeaders_Alloc();
+                http_data->recvMsg.respHeader = HTTPHeaders_Alloc();
             }
-            if (data->recvMsg.msgBody == NULL)
+            if (http_data->recvMsg.msgBody == NULL)
             {
-                data->recvMsg.msgBody = BUFFER_new();
+                http_data->recvMsg.msgBody = BUFFER_new();
             }
-            data->recvMsg.chunkedReply = false;
+            http_data->recvMsg.chunkedReply = false;
         }
 
-        if (data->recvMsg.storedLen == 0)
+        if (http_data->recvMsg.storedLen == 0)
         {
-            data->recvMsg.storedBytes = (unsigned char*)malloc(len);
-            memcpy(data->recvMsg.storedBytes, buffer, len);
-            data->recvMsg.storedLen = len;
+            http_data->recvMsg.storedBytes = (unsigned char*)malloc(len);
+            memcpy(http_data->recvMsg.storedBytes, buffer, len);
+            http_data->recvMsg.storedLen = len;
         }
         else
         {
-            size_t newSize = data->recvMsg.storedLen+len;
+            size_t newSize = http_data->recvMsg.storedLen+len;
             unsigned char* tmpBuff = (unsigned char*)malloc(newSize);
             if (tmpBuff == NULL)
             {
                 LogError("Failure reallocating buffer.");
-                data->recvMsg.recvState = state_error;
-                free(data->recvMsg.storedBytes);
-                data->recvMsg.storedBytes = NULL;
+                http_data->recvMsg.recvState = state_error;
+                free(http_data->recvMsg.storedBytes);
+                http_data->recvMsg.storedBytes = NULL;
+                execute_result = HTTPAPI_ALLOC_FAILED;
             }
             else
             {
-                memcpy(tmpBuff, data->recvMsg.storedBytes, data->recvMsg.storedLen);
-                free(data->recvMsg.storedBytes);
-                data->recvMsg.storedBytes = tmpBuff;
-                memcpy(data->recvMsg.storedBytes+data->recvMsg.storedLen, buffer, len);
-                data->recvMsg.storedLen = newSize;
+                memcpy(tmpBuff, http_data->recvMsg.storedBytes, http_data->recvMsg.storedLen);
+                free(http_data->recvMsg.storedBytes);
+                http_data->recvMsg.storedBytes = tmpBuff;
+                memcpy(http_data->recvMsg.storedBytes+http_data->recvMsg.storedLen, buffer, len);
+                http_data->recvMsg.storedLen = newSize;
             }
         }
 
-        if (data->recvMsg.recvState == state_initial)
+        if (http_data->recvMsg.recvState == state_initial)
         {
             index = 0;
-            int lineComplete = ProcessStatusCodeLine(data->recvMsg.storedBytes, data->recvMsg.storedLen, &index, &data->recvMsg.statusCode);
-            if (lineComplete == 0 && data->recvMsg.statusCode > 0)
+            int lineComplete = ProcessStatusCodeLine(http_data->recvMsg.storedBytes, http_data->recvMsg.storedLen, &index, &http_data->recvMsg.statusCode);
+            if (lineComplete == 0 && http_data->recvMsg.statusCode > 0)
             {
-                data->recvMsg.recvState = state_status_line;
+                http_data->recvMsg.recvState = state_status_line;
 
                 // Let's remove the unneccessary bytes
-                size_t allocLen = data->recvMsg.storedLen-index;
+                size_t allocLen = http_data->recvMsg.storedLen-index;
                 unsigned char* tmpBuff = (unsigned char*)malloc(allocLen);
-                memcpy(tmpBuff, data->recvMsg.storedBytes+index, allocLen);
-                free(data->recvMsg.storedBytes);
-                data->recvMsg.storedBytes = tmpBuff;
-                data->recvMsg.storedLen = allocLen;
+                memcpy(tmpBuff, http_data->recvMsg.storedBytes+index, allocLen);
+                free(http_data->recvMsg.storedBytes);
+                http_data->recvMsg.storedBytes = tmpBuff;
+                http_data->recvMsg.storedLen = allocLen;
             }
         }
-        if (data->recvMsg.recvState == state_status_line)
+        if (http_data->recvMsg.recvState == state_status_line)
         {
             // Gather the Header
             index = 0;
-            int headerComplete = ProcessHeaderLine(data->recvMsg.storedBytes, data->recvMsg.storedLen, &index, data->recvMsg.respHeader, &data->recvMsg.totalBodyLen, &data->recvMsg.chunkedReply);
+            int headerComplete = ProcessHeaderLine(http_data->recvMsg.storedBytes, http_data->recvMsg.storedLen, &index, http_data->recvMsg.respHeader, &http_data->recvMsg.totalBodyLen, &http_data->recvMsg.chunkedReply);
             if (headerComplete == 0)
             {
-                if (data->recvMsg.totalBodyLen == 0)
+                if (http_data->recvMsg.totalBodyLen == 0)
                 {
-                    if (data->recvMsg.chunkedReply)
+                    if (http_data->recvMsg.chunkedReply)
                     {
-                        data->recvMsg.recvState = state_message_chunked;
+                        http_data->recvMsg.recvState = state_message_chunked;
                     }
                     else
                     {
                         // Content len is 0 so we are finished with the body
-                        data->fnReplyCallback((HTTP_CLIENT_HANDLE)data, data->userCtx, NULL, 0, data->recvMsg.statusCode, data->recvMsg.respHeader);
-                        data->recvMsg.recvState = state_message_body;
+                        execute_result = HTTPAPI_OK;
+                        http_data->recvMsg.fn_execute_complete(http_data->recvMsg.execute_ctx, execute_result, http_data->recvMsg.statusCode, http_data->recvMsg.respHeader, NULL);
+                        http_data->recvMsg.recvState = state_message_body;
                     }
                 }
                 else
                 {
-                    data->recvMsg.recvState = state_response_header;
+                    http_data->recvMsg.recvState = state_response_header;
                 }
             }
             if (index > 0)
             {
                 // Let's remove the unneccessary bytes
-                size_t allocLen = data->recvMsg.storedLen-index;
+                size_t allocLen = http_data->recvMsg.storedLen-index;
                 unsigned char* tmpBuff = (unsigned char*)malloc(allocLen);
-                memcpy(tmpBuff, data->recvMsg.storedBytes+index, allocLen);
-                free(data->recvMsg.storedBytes);
-                data->recvMsg.storedBytes = tmpBuff;
-                data->recvMsg.storedLen = allocLen;
+                memcpy(tmpBuff, http_data->recvMsg.storedBytes+index, allocLen);
+                free(http_data->recvMsg.storedBytes);
+                http_data->recvMsg.storedBytes = tmpBuff;
+                http_data->recvMsg.storedLen = allocLen;
             }
         }
-        if (data->recvMsg.recvState == state_response_header)
+        if (http_data->recvMsg.recvState == state_response_header)
         {
-            if (data->recvMsg.totalBodyLen != 0)
+            if (http_data->recvMsg.totalBodyLen != 0)
             {
                 bool parseSuccess = false;
-                if (data->recvMsg.storedLen == data->recvMsg.totalBodyLen)
+                if (http_data->recvMsg.storedLen == http_data->recvMsg.totalBodyLen)
                 {
-                    if (BUFFER_build(data->recvMsg.msgBody, data->recvMsg.storedBytes, data->recvMsg.storedLen) != 0)
+                    if (BUFFER_build(http_data->recvMsg.msgBody, http_data->recvMsg.storedBytes, http_data->recvMsg.storedLen) != 0)
                     {
-                        data->recvMsg.recvState = state_error;
+                        http_data->recvMsg.recvState = state_error;
                         parseSuccess = false;
                     }
                     else
@@ -389,35 +392,37 @@ static void on_bytes_recv(void* context, const unsigned char* buffer, size_t len
                         parseSuccess = true;
                     }
                 }
-                else if (data->recvMsg.storedLen > data->recvMsg.totalBodyLen)
+                else if (http_data->recvMsg.storedLen > http_data->recvMsg.totalBodyLen)
                 {
-                    data->recvMsg.recvState = state_error;
+                    http_data->recvMsg.recvState = state_error;
                     parseSuccess = false;
                 }
                 if (parseSuccess)
                 {
-                    data->fnReplyCallback((HTTP_CLIENT_HANDLE)data, data->userCtx, BUFFER_u_char(data->recvMsg.msgBody), BUFFER_length(data->recvMsg.msgBody), data->recvMsg.statusCode, data->recvMsg.respHeader);
-                    data->recvMsg.recvState = state_message_body;
+                    execute_result = HTTPAPI_OK;
+                    http_data->recvMsg.fn_execute_complete(http_data->recvMsg.execute_ctx, execute_result, http_data->recvMsg.statusCode, http_data->recvMsg.respHeader, NULL);
+                    //http_data->fnReplyCallback((HTTP_CLIENT_HANDLE)data, http_data->userCtx, BUFFER_u_char(http_data->recvMsg.msgBody), BUFFER_length(http_data->recvMsg.msgBody), http_data->recvMsg.statusCode, http_data->recvMsg.respHeader);
+                    http_data->recvMsg.recvState = state_message_body;
                 }
             }
             else
             {
                 // chunked
-                if (data->fnChunkReplyCallback != NULL)
+                /*if (http_data->fnChunkReplyCallback != NULL)
                 {
-                    data->fnChunkReplyCallback((HTTP_CLIENT_HANDLE)data, data->userCtx, NULL, 0, data->recvMsg.statusCode, data->recvMsg.respHeader, false);
-                }
+                    http_data->fnChunkReplyCallback((HTTP_CLIENT_HANDLE)data, http_data->userCtx, NULL, 0, http_data->recvMsg.statusCode, http_data->recvMsg.respHeader, false);
+                }*/
             }
         }
-        if (data->recvMsg.recvState == state_message_chunked)
+        if (http_data->recvMsg.recvState == state_message_chunked)
         {
             // Chunked reply
             bool crlfEncounted = false;
             size_t chunkLen = 0;
             size_t bytesPos = 0;
-            size_t bytesLen = data->recvMsg.storedLen;
-            const unsigned char* targetPos = data->recvMsg.storedBytes;
-            const unsigned char* iterator = data->recvMsg.storedBytes;
+            size_t bytesLen = http_data->recvMsg.storedLen;
+            const unsigned char* targetPos = http_data->recvMsg.storedBytes;
+            const unsigned char* iterator = http_data->recvMsg.storedBytes;
 
             for (index = 0; index < bytesLen; index++, bytesPos++, iterator++)
             {
@@ -427,39 +432,39 @@ static void on_bytes_recv(void* context, const unsigned char* buffer, size_t len
                     chunkLen = ConvertCharToHex(targetPos, hexLen);
                     if (chunkLen == 0)
                     {
-                        if (data->fnChunkReplyCallback != NULL)
+                        /*if (http_data->fnChunkReplyCallback != NULL)
                         {
-                            data->fnChunkReplyCallback((HTTP_CLIENT_HANDLE)data, data->userCtx, NULL, 0, data->recvMsg.statusCode, data->recvMsg.respHeader, true);
-                            data->recvMsg.recvState = state_message_body;
+                            http_data->fnChunkReplyCallback((HTTP_HANDLE)data, http_data->userCtx, NULL, 0, http_data->recvMsg.statusCode, http_data->recvMsg.respHeader, true);
+                            http_data->recvMsg.recvState = state_message_body;
                             break;
-                        }
+                        }*/
                     }
-                    else if (chunkLen <= data->recvMsg.storedLen-index)
+                    else if (chunkLen <= http_data->recvMsg.storedLen-index)
                     {
                         // Send the user the chunk
-                        if (BUFFER_build(data->recvMsg.msgBody, iterator+bytesPos+2, chunkLen) != 0)
+                        if (BUFFER_build(http_data->recvMsg.msgBody, iterator+bytesPos+2, chunkLen) != 0)
                         {
-                            data->recvMsg.recvState = state_error;
+                            http_data->recvMsg.recvState = state_error;
                         }
                         else
                         {
-                            if (data->fnChunkReplyCallback != NULL)
+                            /*if (http_data->fnChunkReplyCallback != NULL)
                             {
-                                data->fnChunkReplyCallback((HTTP_CLIENT_HANDLE)data, data->userCtx, BUFFER_u_char(data->recvMsg.msgBody), BUFFER_length(data->recvMsg.msgBody), data->recvMsg.statusCode, data->recvMsg.respHeader, false);
-                            }
+                                http_data->fnChunkReplyCallback((HTTP_CLIENT_HANDLE)data, http_data->userCtx, BUFFER_u_char(http_data->recvMsg.msgBody), BUFFER_length(http_data->recvMsg.msgBody), http_data->recvMsg.statusCode, http_data->recvMsg.respHeader, false);
+                            }*/
                             index += chunkLen+2;
-                            if (chunkLen != data->recvMsg.storedLen-index)
+                            if (chunkLen != http_data->recvMsg.storedLen-index)
                             {
                                 // Let's remove the unneccessary bytes
-                                size_t allocLen = data->recvMsg.storedLen-chunkLen;
+                                size_t allocLen = http_data->recvMsg.storedLen-chunkLen;
                                 unsigned char* tmpBuff = (unsigned char*)malloc(allocLen);
-                                memcpy(tmpBuff, data->recvMsg.storedBytes+index, allocLen);
-                                free(data->recvMsg.storedBytes);
-                                data->recvMsg.storedBytes = tmpBuff;
-                                data->recvMsg.storedLen = allocLen;
+                                memcpy(tmpBuff, http_data->recvMsg.storedBytes+index, allocLen);
+                                free(http_data->recvMsg.storedBytes);
+                                http_data->recvMsg.storedBytes = tmpBuff;
+                                http_data->recvMsg.storedLen = allocLen;
                                 bytesPos = 0;
                             }
-                            iterator = targetPos = data->recvMsg.storedBytes;
+                            iterator = targetPos = http_data->recvMsg.storedBytes;
                         }
                     }
                     else
@@ -476,15 +481,15 @@ static void on_bytes_recv(void* context, const unsigned char* buffer, size_t len
                 }
             }
         }
-        if (data->recvMsg.recvState == state_message_body || data->recvMsg.recvState == state_error)
+        if (http_data->recvMsg.recvState == state_message_body || http_data->recvMsg.recvState == state_error)
         {
-            HTTPHeaders_Free(data->recvMsg.respHeader);
-            data->recvMsg.respHeader = NULL;
-            BUFFER_delete(data->recvMsg.msgBody);
-            data->recvMsg.msgBody = NULL;
-            free(data->recvMsg.storedBytes);
-            data->recvMsg.storedBytes = NULL;
-            data->recvMsg.storedLen = 0;
+            HTTPHeaders_Free(http_data->recvMsg.respHeader);
+            http_data->recvMsg.respHeader = NULL;
+            BUFFER_delete(http_data->recvMsg.msgBody);
+            http_data->recvMsg.msgBody = NULL;
+            free(http_data->recvMsg.storedBytes);
+            http_data->recvMsg.storedBytes = NULL;
+            http_data->recvMsg.storedLen = 0;
         }
     }
 }
@@ -1170,7 +1175,6 @@ HTTPAPI_RESULT HTTPAPI_ExecuteRequestAsync(HTTP_HANDLE handle, HTTPAPI_REQUEST_T
         {
             if (content != NULL && contentLength != 0)
             {
-                /* Tests_SRS_UHTTP_07_018: [upon success http_client_execute_request shall then transmit the content data, if supplied, through a call to xio_send.] */
                 if (write_http_data(http_data, content, contentLength) != 0)
                 {
                     LogError("Failure writing content buffer");
@@ -1203,19 +1207,19 @@ void HTTPAPI_DoWork(HTTP_HANDLE handle)
     }
 }
 
-static int my_strnicmp(const char* s1, const char* s2, size_t n)
+/*static int my_strnicmp(const char* s1, const char* s2, size_t n)
 {
     size_t i;
     int result = 0;
 
     for (i = 0; i < n; i++)
     {
-        /* compute the difference between the chars */
+        // compute the difference between the chars
         result = tolower(s1[i]) - tolower(s2[i]);
 
-        /* break if we have a difference ... */
+        // break if we have a difference ... 
         if ((result != 0) ||
-            /* ... or if we got to the end of one the strings */
+            // ... or if we got to the end of one the strings 
             (s1[i] == '\0') || (s2[i] == '\0'))
         {
             break;
@@ -1231,7 +1235,7 @@ static int my_stricmp(const char* s1, const char* s2)
 
     while ((s1[i] != '\0') && (s2[i] != '\0'))
     {
-        /* break if we have a difference ... */
+        // break if we have a difference ...
         if (tolower(s1[i]) != tolower(s2[i]))
         {
             break;
@@ -1240,12 +1244,12 @@ static int my_stricmp(const char* s1, const char* s2)
         i++;
     }
 
-    /* if we broke because we are at end of string this will yield 0 */
-    /* if we broke because there was a difference this will yield non-zero  */
+    // if we broke because we are at end of string this will yield 0
+    // if we broke because there was a difference this will yield non-zero
     return tolower(s1[i]) - tolower(s2[i]);
 }
 
-/*static void on_bytes_received(void* context, const unsigned char* buffer, size_t size)
+static void on_bytes_received(void* context, const unsigned char* buffer, size_t size)
 {
     HTTP_HANDLE_DATA* h = (HTTP_HANDLE_DATA*)context;
 
@@ -1454,35 +1458,37 @@ static int skipN(HTTP_HANDLE_DATA* http_instance, size_t n, char* buf, size_t si
 HTTPAPI_RESULT HTTPAPI_SetOption(HTTP_HANDLE handle, const char* optionName, const void* value)
 {
     HTTPAPI_RESULT result;
-    if (
-        (handle == NULL) ||
-        (optionName == NULL) ||
-        (value == NULL)
-        )
+    if (handle == NULL || optionName == NULL || value == NULL)
     {
         result = HTTPAPI_INVALID_ARG;
         LogError("invalid parameter (NULL) passed to HTTPAPI_SetOption");
     }
     else if (strcmp("TrustedCerts", optionName) == 0)
     {
-        HTTP_HANDLE_DATA* h = (HTTP_HANDLE_DATA*)handle;
-        if (h->certificate)
+        HTTP_HANDLE_DATA* http_data = (HTTP_HANDLE_DATA*)handle;
+        if (http_data->certificate)
         {
-            free(h->certificate);
+            free(http_data->certificate);
         }
 
         int len = strlen((char*)value);
-        h->certificate = (char*)malloc(len + 1);
-        if (h->certificate == NULL)
+        http_data->certificate = (char*)malloc(len + 1);
+        if (http_data->certificate == NULL)
         {
             result = HTTPAPI_ERROR;
             LogError("unable to allocate certificate memory in HTTPAPI_SetOption");
         }
         else
         {
-            (void)strcpy(h->certificate, (const char*)value);
+            (void)strcpy(http_data->certificate, (const char*)value);
             result = HTTPAPI_OK;
         }
+    }
+    else if (strcmp("logtrace", optionName) == 0)
+    {
+        HTTP_HANDLE_DATA* http_data = (HTTP_HANDLE_DATA*)handle;
+        http_data->logTrace = *((bool*)value);
+        result = HTTPAPI_OK;
     }
     else
     {
@@ -1495,11 +1501,7 @@ HTTPAPI_RESULT HTTPAPI_SetOption(HTTP_HANDLE handle, const char* optionName, con
 HTTPAPI_RESULT HTTPAPI_CloneOption(const char* optionName, const void* value, const void** savedValue)
 {
     HTTPAPI_RESULT result;
-    if (
-        (optionName == NULL) ||
-        (value == NULL) ||
-        (savedValue == NULL)
-        )
+    if (optionName == NULL || value == NULL || savedValue == NULL)
     {
         result = HTTPAPI_INVALID_ARG;
         LogError("invalid argument(NULL) passed to HTTPAPI_CloneOption");
@@ -1510,13 +1512,27 @@ HTTPAPI_RESULT HTTPAPI_CloneOption(const char* optionName, const void* value, co
         char* tempCert = (char*)malloc(certLen+1);
         if (tempCert == NULL)
         {
-            result = HTTPAPI_INVALID_ARG;
+            result = HTTPAPI_ALLOC_FAILED;
             LogError("unable to allocate certificate memory in HTTPAPI_CloneOption");
         }
         else
         {
             (void)strcpy(tempCert, (const char*)value);
             *savedValue = tempCert;
+            result = HTTPAPI_OK;
+        }
+    }
+    else if (strcmp("logtrace", optionName) == 0)
+    {
+        bool* tempLogTrace = malloc(sizeof(bool) );
+        if (tempLogTrace == NULL)
+        {
+            result = HTTPAPI_ALLOC_FAILED;
+            LogError("unable to allocate logtrace in HTTPAPI_CloneOption");
+        }
+        else
+        {
+            *savedValue = tempLogTrace;
             result = HTTPAPI_OK;
         }
     }
