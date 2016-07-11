@@ -77,7 +77,11 @@ HTTPAPI_RESULT HTTPAPI_ExecuteRequestAsync(HTTP_HANDLE handle, HTTPAPI_REQUEST_T
 ```
 If the parameters handle or relativePath are NULL, HTTPAPI_ExecuteRequestAsync shall return HTTPAPI_INVALID_ARG.
 If the parameters content is not NULL and contentLength is NULL or content is NULL and contentLength is not NULL, HTTPAPI_ExecuteRequestAsync shall return HTTPAPI_INVALID_ARG.
- 
+If the requestType is not a valid request HTTPAPI_ExecuteRequestAsync shall return HTTPAPI_ERROR
+HTTPAPI_ExecuteRequestAsync shall add the Content-Length http header item to the request if the contentLength is > 0 (rfc 3.3.2)
+If HTTPAPI_ExecuteRequestAsync is called before a previous call is incomplete, HTTPAPI_ExecuteRequestAsync shall return HTTPAPI_ALREADY_INIT 
+HTTPAPI_ExecuteRequestAsync shall add the HOST http header item to the request if not supplied (rfc - 5.4).
+
 ###HTTPAPI_DoWork
 ```c
 void HTTPAPI_DoWork(HTTP_HANDLE handle)

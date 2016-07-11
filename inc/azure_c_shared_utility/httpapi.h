@@ -28,8 +28,6 @@ extern "C" {
 
 typedef struct HTTP_HANDLE_DATA_TAG* HTTP_HANDLE;
 
-typedef void(*ON_EXECUTE_COMPLETE)(void* callback_context, unsigned int statusCode, HTTP_HEADERS_HANDLE responseHeadersHandle, BUFFER_HANDLE responseContent);
-
 #define AMBIGUOUS_STATUS_CODE           (300)
 
 #define HTTPAPI_RESULT_VALUES                \
@@ -58,12 +56,15 @@ HTTPAPI_INSUFFICIENT_RESPONSE_BUFFER         \
  */
 DEFINE_ENUM(HTTPAPI_RESULT, HTTPAPI_RESULT_VALUES);
 
-#define HTTPAPI_REQUEST_TYPE_VALUES\
+#define HTTPAPI_REQUEST_TYPE_VALUES \
+    HTTPAPI_REQUEST_OPTIONS,        \
     HTTPAPI_REQUEST_GET,            \
     HTTPAPI_REQUEST_POST,           \
     HTTPAPI_REQUEST_PUT,            \
     HTTPAPI_REQUEST_DELETE,         \
     HTTPAPI_REQUEST_PATCH           \
+
+typedef void(*ON_EXECUTE_COMPLETE)(void* callback_context, HTTPAPI_RESULT execute_result, unsigned int statusCode, HTTP_HEADERS_HANDLE responseHeadersHandle, BUFFER_HANDLE responseContent);
 
 /** @brief Enumeration specifying the HTTP request verbs accepted by
  *	the HTTPAPI module.
@@ -166,7 +167,7 @@ MOCKABLE_FUNCTION(, HTTPAPI_RESULT, HTTPAPI_ExecuteRequest, HTTP_HANDLE, handle,
 
 MOCKABLE_FUNCTION(, HTTPAPI_RESULT, HTTPAPI_ExecuteRequestAsync, HTTP_HANDLE, handle, HTTPAPI_REQUEST_TYPE, requestType, const char*, relativePath,
     HTTP_HEADERS_HANDLE, httpHeadersHandle, const unsigned char*, content,
-    size_t, contentLength, ON_EXECUTE_COMPLETE, on_send_complete, void*, callback_context);
+    size_t, contentLength, ON_EXECUTE_COMPLETE, on_execute_complete, void*, callback_context);
 
 MOCKABLE_FUNCTION(, void, HTTPAPI_DoWork, HTTP_HANDLE, handle);
 

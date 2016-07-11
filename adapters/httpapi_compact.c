@@ -22,6 +22,13 @@
 
 #define MAX_HOSTNAME_LEN        255
 #define TEMP_BUFFER_SIZE        4096
+#define TIME_MAX_BUFFER     16
+
+static const char* HTTP_REQUEST_LINE_FMT = "%s %s HTTP/1.1\r\n";
+static const char* HTTP_CONTENT_LEN = "Content-Length";
+static const char* HTTP_CHUNKED_ENCODING_HDR = "Transfer-Encoding: chunked\r\n";
+static const char* HTTP_CRLF_VALUE = "\r\n";
+static const char* FORMAT_HEX_CHAR = "0x%02x ";
 
 #define CHAR_COUNT(A)   (sizeof(A) - 1)
 
@@ -35,16 +42,40 @@ typedef enum SEND_ALL_RESULT_TAG
     SEND_ALL_RESULT_ERROR
 } SEND_ALL_RESULT;
 
+typedef enum RESPONSE_MESSAGE_STATE_TAG
+{
+    state_initial,
+    state_status_line,
+    state_response_header,
+    state_message_body,
+    state_message_chunked,
+    state_error
+} RESPONSE_MESSAGE_STATE;
+
+typedef struct HTTP_RECV_DATA_TAG
+{
+    int statusCode;
+    RESPONSE_MESSAGE_STATE recvState;
+    HTTP_HEADERS_HANDLE respHeader;
+    BUFFER_HANDLE msgBody;
+    size_t totalBodyLen;
+    unsigned char* storedBytes;
+    size_t storedLen;
+    ON_EXECUTE_COMPLETE fn_execute_complete;
+    void* execute_ctx;
+    bool chunkedReply;
+} HTTP_RECV_DATA;
+
 typedef struct HTTP_HANDLE_DATA_TAG
 {
     char* hostname;
     char* certificate;
     XIO_HANDLE xio_handle;
-    ON_EXECUTE_COMPLETE fn_execute_complete;
-    void* execute_ctx;
     size_t received_bytes_count;
     unsigned char*  received_bytes;
     SEND_ALL_RESULT send_all_result;
+
+    HTTP_RECV_DATA recvMsg;
     unsigned int is_io_error : 1;
     unsigned int is_connected : 1;
     bool logTrace;
@@ -62,6 +93,167 @@ static void getLogTime(char* timeResult, size_t len)
         }
     }
 }
+
+static int ProcessStatusCodeLine(const unsigned char* buffer, size_t len, size_t* position, int* statusLen)
+{
+    int result = __LINE__;
+    size_t index;
+    int spaceFound = 0;
+    const char* initSpace = NULL;
+    char statusCode[4];
+
+    for (index = 0; index < len; index++)
+    {
+        if (buffer[index] == ' ')
+        {
+            if (spaceFound == 1)
+            {
+                strncpy(statusCode, initSpace, 3);
+                statusCode[3] = '\0';
+            }
+            else
+            {
+                initSpace = (const char*)buffer+index+1;
+            }
+            spaceFound++;
+        }
+        else if (buffer[index] == '\n')
+        {
+            *statusLen = (int)atol(statusCode);
+            if (index < len)
+            {
+                *position = index+1;
+            }
+            else
+            {
+                *position = index;
+            }
+            result = 0;
+            break;
+        }
+    }
+    return result;
+}
+
+static int ProcessHeaderLine(const unsigned char* buffer, size_t len, size_t* position, HTTP_HEADERS_HANDLE respHeader, size_t* contentLen, bool* isChunked)
+{
+    int result = __LINE__;
+    size_t index;
+    const unsigned char* targetPos = buffer;
+    bool crlfEncounted = false;
+    bool colonEncountered = false;
+    char* headerKey = NULL;
+    bool continueProcessing = true;
+
+    for (index = 0; index < len && continueProcessing; index++)
+    {
+        if (buffer[index] == ':' && !colonEncountered)
+        {
+            colonEncountered = true;
+            size_t keyLen = (&buffer[index])-targetPos;
+            headerKey = (char*)malloc(keyLen+1);
+            memcpy(headerKey, targetPos, keyLen);
+            headerKey[keyLen] = '\0';
+
+            targetPos = buffer+index+1;
+            crlfEncounted = false;
+        }
+        else if (buffer[index] == '\r')
+        {
+            if (headerKey != NULL)
+            {
+                // Remove leading spaces
+                while (*targetPos == 32) { targetPos++; }
+
+                size_t valueLen = (&buffer[index])-targetPos;
+                char* headerValue = (char*)malloc(valueLen+1);
+                memcpy(headerValue, targetPos, valueLen);
+                headerValue[valueLen] = '\0';
+
+                if (HTTPHeaders_AddHeaderNameValuePair(respHeader, headerKey, headerValue) != HTTP_HEADERS_OK)
+                {
+                    result = __LINE__;
+                    continueProcessing = false;
+                }
+                else
+                {
+                    if (strcmp(headerKey, HTTP_CONTENT_LEN) == 0)
+                    {
+                        *isChunked = false;
+                        *contentLen = atol(headerValue);
+                    }
+                    else if (strcmp(headerKey, "Transfer-Encoding") == 0)
+                    {
+                        *isChunked = true;
+                        *contentLen = 0;
+                    }
+                }
+                free(headerKey);
+                headerKey = NULL;
+                free(headerValue);
+            }
+        }
+        else if (buffer[index] == '\n')
+        {
+            if (index < len)
+            {
+                *position = index+1;
+            }
+            else
+            {
+                *position = index;
+            }
+            if (crlfEncounted)
+            {
+                result = 0;
+                break;
+            }
+            else
+            {
+                colonEncountered = false;
+                crlfEncounted = true;
+                targetPos = buffer+index+1;
+            }
+        }
+        else
+        {
+            crlfEncounted = false;
+        }
+    }
+    if (headerKey != NULL)
+    {
+        free(headerKey);
+    }
+    return result;
+}
+
+static int ConvertCharToHex(const unsigned char* hexText, size_t len)
+{
+    int result = 0;
+    for (size_t index = 0; index < len; index++)
+    {
+        int accumulator = 0;
+        if (hexText[index] >= 48 && hexText[index] <= 57)
+        {
+            accumulator = hexText[index] - 48;
+        }
+        else if (hexText[index] >= 65 && hexText[index] <= 70)
+        {
+            accumulator = hexText[index] - 55;
+        }
+        else if (hexText[index] >= 97 && hexText[index] <= 102)
+        {
+            accumulator = hexText[index] - 87;
+        }
+        if (index > 0)
+        {
+            result = result << 4;
+        }
+        result += accumulator;
+    }
+    return result;
+}
+
 
 static void on_io_open_complete(void* context, IO_OPEN_RESULT open_result)
 {
@@ -82,21 +274,217 @@ static void on_io_open_complete(void* context, IO_OPEN_RESULT open_result)
 
 static void on_bytes_recv(void* context, const unsigned char* buffer, size_t len)
 {
-    HTTP_HANDLE_DATA* http_data = (HTTP_HANDLE_DATA*)context;
-    if (http_data != NULL)
+    HTTP_CLIENT_HANDLE_DATA* data = (HTTP_CLIENT_HANDLE_DATA*)context;
+    size_t index = 0;
+
+    if (data != NULL && buffer != NULL && len > 0 && data->recvMsg.recvState != state_error)
     {
-        /* Here we got some bytes so we'll buffer them so the receive functions can consumer it */
-        unsigned char* new_received_bytes = (unsigned char*)realloc(http_data->received_bytes, http_data->received_bytes_count + len);
-        if (new_received_bytes == NULL)
+        if (data->recvMsg.recvState == state_initial)
         {
-            http_data->is_io_error = 1;
-            LogError("on_bytes_received: Error allocating memory for received data");
+            if (data->recvMsg.respHeader == NULL)
+            {
+                data->recvMsg.respHeader = HTTPHeaders_Alloc();
+            }
+            if (data->recvMsg.msgBody == NULL)
+            {
+                data->recvMsg.msgBody = BUFFER_new();
+            }
+            data->recvMsg.chunkedReply = false;
+        }
+
+        if (data->recvMsg.storedLen == 0)
+        {
+            data->recvMsg.storedBytes = (unsigned char*)malloc(len);
+            memcpy(data->recvMsg.storedBytes, buffer, len);
+            data->recvMsg.storedLen = len;
         }
         else
         {
-            http_data->received_bytes = new_received_bytes;
-            (void)memcpy(http_data->received_bytes + http_data->received_bytes_count, buffer, len);
-            http_data->received_bytes_count += len;
+            size_t newSize = data->recvMsg.storedLen+len;
+            unsigned char* tmpBuff = (unsigned char*)malloc(newSize);
+            if (tmpBuff == NULL)
+            {
+                LogError("Failure reallocating buffer.");
+                data->recvMsg.recvState = state_error;
+                free(data->recvMsg.storedBytes);
+                data->recvMsg.storedBytes = NULL;
+            }
+            else
+            {
+                memcpy(tmpBuff, data->recvMsg.storedBytes, data->recvMsg.storedLen);
+                free(data->recvMsg.storedBytes);
+                data->recvMsg.storedBytes = tmpBuff;
+                memcpy(data->recvMsg.storedBytes+data->recvMsg.storedLen, buffer, len);
+                data->recvMsg.storedLen = newSize;
+            }
+        }
+
+        if (data->recvMsg.recvState == state_initial)
+        {
+            index = 0;
+            int lineComplete = ProcessStatusCodeLine(data->recvMsg.storedBytes, data->recvMsg.storedLen, &index, &data->recvMsg.statusCode);
+            if (lineComplete == 0 && data->recvMsg.statusCode > 0)
+            {
+                data->recvMsg.recvState = state_status_line;
+
+                // Let's remove the unneccessary bytes
+                size_t allocLen = data->recvMsg.storedLen-index;
+                unsigned char* tmpBuff = (unsigned char*)malloc(allocLen);
+                memcpy(tmpBuff, data->recvMsg.storedBytes+index, allocLen);
+                free(data->recvMsg.storedBytes);
+                data->recvMsg.storedBytes = tmpBuff;
+                data->recvMsg.storedLen = allocLen;
+            }
+        }
+        if (data->recvMsg.recvState == state_status_line)
+        {
+            // Gather the Header
+            index = 0;
+            int headerComplete = ProcessHeaderLine(data->recvMsg.storedBytes, data->recvMsg.storedLen, &index, data->recvMsg.respHeader, &data->recvMsg.totalBodyLen, &data->recvMsg.chunkedReply);
+            if (headerComplete == 0)
+            {
+                if (data->recvMsg.totalBodyLen == 0)
+                {
+                    if (data->recvMsg.chunkedReply)
+                    {
+                        data->recvMsg.recvState = state_message_chunked;
+                    }
+                    else
+                    {
+                        // Content len is 0 so we are finished with the body
+                        data->fnReplyCallback((HTTP_CLIENT_HANDLE)data, data->userCtx, NULL, 0, data->recvMsg.statusCode, data->recvMsg.respHeader);
+                        data->recvMsg.recvState = state_message_body;
+                    }
+                }
+                else
+                {
+                    data->recvMsg.recvState = state_response_header;
+                }
+            }
+            if (index > 0)
+            {
+                // Let's remove the unneccessary bytes
+                size_t allocLen = data->recvMsg.storedLen-index;
+                unsigned char* tmpBuff = (unsigned char*)malloc(allocLen);
+                memcpy(tmpBuff, data->recvMsg.storedBytes+index, allocLen);
+                free(data->recvMsg.storedBytes);
+                data->recvMsg.storedBytes = tmpBuff;
+                data->recvMsg.storedLen = allocLen;
+            }
+        }
+        if (data->recvMsg.recvState == state_response_header)
+        {
+            if (data->recvMsg.totalBodyLen != 0)
+            {
+                bool parseSuccess = false;
+                if (data->recvMsg.storedLen == data->recvMsg.totalBodyLen)
+                {
+                    if (BUFFER_build(data->recvMsg.msgBody, data->recvMsg.storedBytes, data->recvMsg.storedLen) != 0)
+                    {
+                        data->recvMsg.recvState = state_error;
+                        parseSuccess = false;
+                    }
+                    else
+                    {
+                        parseSuccess = true;
+                    }
+                }
+                else if (data->recvMsg.storedLen > data->recvMsg.totalBodyLen)
+                {
+                    data->recvMsg.recvState = state_error;
+                    parseSuccess = false;
+                }
+                if (parseSuccess)
+                {
+                    data->fnReplyCallback((HTTP_CLIENT_HANDLE)data, data->userCtx, BUFFER_u_char(data->recvMsg.msgBody), BUFFER_length(data->recvMsg.msgBody), data->recvMsg.statusCode, data->recvMsg.respHeader);
+                    data->recvMsg.recvState = state_message_body;
+                }
+            }
+            else
+            {
+                // chunked
+                if (data->fnChunkReplyCallback != NULL)
+                {
+                    data->fnChunkReplyCallback((HTTP_CLIENT_HANDLE)data, data->userCtx, NULL, 0, data->recvMsg.statusCode, data->recvMsg.respHeader, false);
+                }
+            }
+        }
+        if (data->recvMsg.recvState == state_message_chunked)
+        {
+            // Chunked reply
+            bool crlfEncounted = false;
+            size_t chunkLen = 0;
+            size_t bytesPos = 0;
+            size_t bytesLen = data->recvMsg.storedLen;
+            const unsigned char* targetPos = data->recvMsg.storedBytes;
+            const unsigned char* iterator = data->recvMsg.storedBytes;
+
+            for (index = 0; index < bytesLen; index++, bytesPos++, iterator++)
+            {
+                if (*iterator == '\r')
+                {
+                    size_t hexLen = iterator-targetPos;
+                    chunkLen = ConvertCharToHex(targetPos, hexLen);
+                    if (chunkLen == 0)
+                    {
+                        if (data->fnChunkReplyCallback != NULL)
+                        {
+                            data->fnChunkReplyCallback((HTTP_CLIENT_HANDLE)data, data->userCtx, NULL, 0, data->recvMsg.statusCode, data->recvMsg.respHeader, true);
+                            data->recvMsg.recvState = state_message_body;
+                            break;
+                        }
+                    }
+                    else if (chunkLen <= data->recvMsg.storedLen-index)
+                    {
+                        // Send the user the chunk
+                        if (BUFFER_build(data->recvMsg.msgBody, iterator+bytesPos+2, chunkLen) != 0)
+                        {
+                            data->recvMsg.recvState = state_error;
+                        }
+                        else
+                        {
+                            if (data->fnChunkReplyCallback != NULL)
+                            {
+                                data->fnChunkReplyCallback((HTTP_CLIENT_HANDLE)data, data->userCtx, BUFFER_u_char(data->recvMsg.msgBody), BUFFER_length(data->recvMsg.msgBody), data->recvMsg.statusCode, data->recvMsg.respHeader, false);
+                            }
+                            index += chunkLen+2;
+                            if (chunkLen != data->recvMsg.storedLen-index)
+                            {
+                                // Let's remove the unneccessary bytes
+                                size_t allocLen = data->recvMsg.storedLen-chunkLen;
+                                unsigned char* tmpBuff = (unsigned char*)malloc(allocLen);
+                                memcpy(tmpBuff, data->recvMsg.storedBytes+index, allocLen);
+                                free(data->recvMsg.storedBytes);
+                                data->recvMsg.storedBytes = tmpBuff;
+                                data->recvMsg.storedLen = allocLen;
+                                bytesPos = 0;
+                            }
+                            iterator = targetPos = data->recvMsg.storedBytes;
+                        }
+                    }
+                    else
+                    {
+                        break;
+                    }
+                }
+                else if (*iterator == '\n')
+                {
+                    if (crlfEncounted)
+                    {
+
+                    }
+                }
+            }
+        }
+        if (data->recvMsg.recvState == state_message_body || data->recvMsg.recvState == state_error)
+        {
+            HTTPHeaders_Free(data->recvMsg.respHeader);
+            data->recvMsg.respHeader = NULL;
+            BUFFER_delete(data->recvMsg.msgBody);
+            data->recvMsg.msgBody = NULL;
+            free(data->recvMsg.storedBytes);
+            data->recvMsg.storedBytes = NULL;
+            data->recvMsg.storedLen = 0;
         }
     }
 }
@@ -113,14 +501,20 @@ static void on_io_error(void* context)
 
 static void on_send_complete(void* context, IO_SEND_RESULT send_result)
 {
-    (void)context;
-    //printf("Sending Data has been complete. Result %d\r\n", send_result);
+    if (send_result != IO_SEND_OK)
+    {
+        HTTP_HANDLE_DATA* http_data = (HTTP_HANDLE_DATA*)context;
+        if (http_data != NULL)
+        {
+            http_data->is_io_error = 1;
+        }
+    }
 }
 
-static int write_http_line(HTTP_HANDLE_DATA* http_data, const char* writeText)
+static int write_http_data(HTTP_HANDLE_DATA* http_data, const unsigned char* writeData, size_t length)
 {
     int result;
-    if (xio_send(http_data->xio_handle, writeText, strlen(writeText), sendCompleteCb, NULL) != 0)
+    if (xio_send(http_data->xio_handle, writeData, length, on_send_complete, http_data) != 0)
     {
         result = __LINE__;
     }
@@ -132,8 +526,177 @@ static int write_http_line(HTTP_HANDLE_DATA* http_data, const char* writeText)
             char timeResult[TIME_MAX_BUFFER];
             getLogTime(timeResult, TIME_MAX_BUFFER);
             LOG(LOG_INFO, LOG_LINE, "%s", timeResult);
+            for (size_t index = 0; index < length; index++)
+            {
+                LOG(LOG_TRACE, 0, "0x%02x ", writeData[index]);
+            }
+        }
+    }
+    return result;
+}
 
+static int write_http_text(HTTP_HANDLE_DATA* http_data, const char* writeText)
+{
+    int result;
+    if (xio_send(http_data->xio_handle, writeText, strlen(writeText), on_send_complete, http_data) != 0)
+    {
+        result = __LINE__;
+    }
+    else
+    {
+        result = 0;
+        if (http_data->logTrace)
+        {
+            char timeResult[TIME_MAX_BUFFER];
+            getLogTime(timeResult, TIME_MAX_BUFFER);
+            LOG(LOG_INFO, LOG_LINE, "%s", timeResult);
             LOG(LOG_TRACE, LOG_LINE, "%s", writeText);
+        }
+    }
+    return result;
+}
+
+static int construct_http_headers(HTTP_HEADERS_HANDLE httpHeaderHandle, size_t contentLen, STRING_HANDLE buffData, bool chunkData)
+{
+    int result = 0;
+    size_t headerCnt;
+    if (HTTPHeaders_GetHeaderCount(httpHeaderHandle, &headerCnt) != HTTP_HEADERS_OK)
+    {
+        result = __LINE__;
+    }
+    else
+    {
+        //bool hostNameFound = false;
+        for (size_t index = 0; index < headerCnt && result == 0; index++)
+        {
+            char* header;
+            if (HTTPHeaders_GetHeader(httpHeaderHandle, index, &header) != HTTP_HEADERS_OK)
+            {
+                result = __LINE__;
+                LogError("Failed in HTTPHeaders_GetHeader");
+            }
+            else
+            {
+                size_t dataLen = strlen(header)+2;
+                char* sendData = malloc(dataLen+1);
+                if (sendData == NULL)
+                {
+                    result = __LINE__;
+                    LogError("Failed in allocating header data");
+                }
+                else
+                {
+                    if (strcmp(header, HTTP_CONTENT_LEN) == 0)
+                    {
+
+                    }
+
+                    if (snprintf(sendData, dataLen+1, "%s\r\n", header) <= 0)
+                    {
+                        result = __LINE__;
+                        LogError("Failed in constructing header data");
+                    }
+                    else
+                    {
+                        if (STRING_concat(buffData, sendData) != 0)
+                        {
+                            result = __LINE__;
+                            LogError("Failed in building header data");
+                        }
+                    }
+                    free(sendData);
+                }
+                free(header);
+            }
+        }
+
+        if (result == 0)
+        {
+            if (chunkData)
+            {
+                if (STRING_concat(buffData, HTTP_CHUNKED_ENCODING_HDR) != 0)
+                {
+                    result = __LINE__;
+                    LogError("Failed building content len header data");
+                }
+            }
+            else
+            {
+                size_t fmtLen = strlen(HTTP_CONTENT_LEN)+strlen(HTTP_CRLF_VALUE)+8;
+                char* content = malloc(fmtLen+1);
+                if (sprintf(content, "%s: %d%s", HTTP_CONTENT_LEN, (int)contentLen, HTTP_CRLF_VALUE) <= 0)
+                {
+                    result = __LINE__;
+                    LogError("Failed allocating content len header data");
+                }
+                else
+                {
+                    if (STRING_concat(buffData, content) != 0)
+                    {
+                        result = __LINE__;
+                        LogError("Failed building content len header data");
+                    }
+                }
+                free(content);
+            }
+
+            if (STRING_concat(buffData, "\r\n") != 0)
+            {
+                result = __LINE__;
+                LogError("Failed sending header finalization data");
+            }
+        }
+    }
+    return result;
+}
+
+static STRING_HANDLE build_http_request(HTTPAPI_REQUEST_TYPE requestType, const char* relativePath, HTTP_HEADERS_HANDLE httpHeadersHandle, size_t contentLength, bool chunkData)
+{
+    STRING_HANDLE result;
+
+    const char* method = (requestType == HTTPAPI_REQUEST_GET) ? "GET"
+        : (requestType == HTTPAPI_REQUEST_OPTIONS) ? "OPTIONS"
+        : (requestType == HTTPAPI_REQUEST_POST) ? "POST"
+        : (requestType == HTTPAPI_REQUEST_PUT) ? "PUT"
+        : (requestType == HTTPAPI_REQUEST_DELETE) ? "DELETE"
+        : (requestType == HTTPAPI_REQUEST_PATCH) ? "PATCH"
+        : NULL;
+    if (method == NULL)
+    {
+        LogError("Invalid request method specified");
+        result = NULL;
+    }
+    else
+    {
+        size_t buffLen = strlen(HTTP_REQUEST_LINE_FMT)+strlen(method)+strlen(relativePath);
+        char* request = malloc(buffLen+1);
+        if (request == NULL)
+        {
+            result = NULL;
+            LogError("Failure allocating Request data");
+        }
+        else
+        {
+            if (snprintf(request, buffLen+1, HTTP_REQUEST_LINE_FMT, method, relativePath) <= 0)
+            {
+                result = NULL;
+                LogError("Failure writing request buffer");
+            }
+            else
+            {
+                result = STRING_construct(request);
+                if (result == NULL)
+                {
+                    LogError("Failure creating buffer object");
+                }
+                else if (construct_http_headers(httpHeadersHandle, contentLength, result, chunkData) != 0)
+                {
+                    STRING_delete(result);
+                    result = NULL;
+                    LogError("Failure writing request buffer");
+                }
+            }
+            free(request);
         }
     }
     return result;
@@ -143,14 +706,14 @@ static int send_http_data(HTTP_HANDLE_DATA* http_data, HTTPAPI_REQUEST_TYPE requ
     HTTP_HEADERS_HANDLE httpHeadersHandle, size_t contentLength, bool sendChunked)
 {
     int result;
-    STRING_HANDLE httpData = ConstructHttpData(requestType, relativePath, httpHeadersHandle, contentLength, sendChunked);
+    STRING_HANDLE httpData = build_http_request(requestType, relativePath, httpHeadersHandle, contentLength, sendChunked);
     if (httpData == NULL)
     {
         result = __LINE__;
     }
     else
     {
-        if (WriteTextLine(http_data, STRING_c_str(httpData)) != 0)
+        if (write_http_text(http_data, STRING_c_str(httpData)) != 0)
         {
             result = __LINE__;
             LogError("Failure writing request buffer");
@@ -580,25 +1143,64 @@ exit:
 }
 
 HTTPAPI_RESULT HTTPAPI_ExecuteRequestAsync(HTTP_HANDLE handle, HTTPAPI_REQUEST_TYPE requestType, const char* relativePath, HTTP_HEADERS_HANDLE httpHeadersHandle,
-    const unsigned char* content, size_t contentLength, ON_EXECUTE_COMPLETE on_send_complete, void* callback_context)
+    const unsigned char* content, size_t contentLength, ON_EXECUTE_COMPLETE on_execute_complete, void* callback_context)
 {
     HTTPAPI_RESULT result;
 
-    if (handle == NULL || relativePath == NULL ||
+    HTTP_HANDLE_DATA* http_data = (HTTP_HANDLE_DATA*)handle;
+
+    if (http_data == NULL || relativePath == NULL ||
         (content != NULL && contentLength == 0) || (content == NULL && contentLength != 0))
     {
         result = HTTPAPI_INVALID_ARG;
     }
+    else if (http_data->recvMsg.recvState != state_initial)
+    {
+        result = HTTPAPI_ALREADY_INIT;
+    }
     else
     {
-        HTTP_HANDLE_DATA* http_data = (HTTP_HANDLE_DATA*)handle;
+        http_data->recvMsg.fn_execute_complete = on_execute_complete;
+        http_data->recvMsg.execute_ctx = callback_context;
+        if (send_http_data(http_data, requestType, relativePath, httpHeadersHandle, contentLength, false) != 0)
+        {
+            result = HTTPAPI_ERROR;
+        }
+        else
+        {
+            if (content != NULL && contentLength != 0)
+            {
+                /* Tests_SRS_UHTTP_07_018: [upon success http_client_execute_request shall then transmit the content data, if supplied, through a call to xio_send.] */
+                if (write_http_data(http_data, content, contentLength) != 0)
+                {
+                    LogError("Failure writing content buffer");
+                    HTTPHeaders_Free(http_data->recvMsg.respHeader);
+                    http_data->recvMsg.respHeader = NULL;
+                    BUFFER_delete(http_data->recvMsg.msgBody);
+                    http_data->recvMsg.msgBody = NULL;
+                    result = HTTPAPI_ERROR;
+                }
+                else
+                {
+                    result = HTTPAPI_OK;
+                }
+            }
+            else
+            {
+                result = HTTPAPI_OK;
+            }
+        }
     }
     return result;
 }
 
 void HTTPAPI_DoWork(HTTP_HANDLE handle)
 {
-
+    if (handle != NULL)
+    {
+        HTTP_HANDLE_DATA* http_data = (HTTP_HANDLE_DATA*)handle;
+        xio_dowork(http_data->xio_handle);
+    }
 }
 
 static int my_strnicmp(const char* s1, const char* s2, size_t n)
@@ -643,11 +1245,11 @@ static int my_stricmp(const char* s1, const char* s2)
     return tolower(s1[i]) - tolower(s2[i]);
 }
 
-static void on_bytes_received(void* context, const unsigned char* buffer, size_t size)
+/*static void on_bytes_received(void* context, const unsigned char* buffer, size_t size)
 {
     HTTP_HANDLE_DATA* h = (HTTP_HANDLE_DATA*)context;
 
-    /* Here we got some bytes so we'll buffer them so the receive functions can consumer it */
+    // Here we got some bytes so we'll buffer them so the receive functions can consumer it
     unsigned char* new_received_bytes = (unsigned char*)realloc(h->received_bytes, h->received_bytes_count + size);
     if (new_received_bytes == NULL)
     {
@@ -676,7 +1278,7 @@ static int conn_receive(HTTP_HANDLE_DATA* http_instance, char* buffer, int count
         {
             xio_dowork(http_instance->xio_handle);
 
-            /* if any error was detected while receiving then simply break and report it */
+            // if any error was detected while receiving then simply break and report it
             if (http_instance->is_io_error != 0)
             {
                 result = -1;
@@ -685,12 +1287,12 @@ static int conn_receive(HTTP_HANDLE_DATA* http_instance, char* buffer, int count
 
             if (http_instance->received_bytes_count >= (size_t)count)
             {
-                /* Consuming bytes from the receive buffer */
+                // Consuming bytes from the receive buffer 
                 (void)memcpy(buffer, http_instance->received_bytes, count);
                 (void)memmove(http_instance->received_bytes, http_instance->received_bytes + count, http_instance->received_bytes_count - count);
                 http_instance->received_bytes_count -= count;
 
-                /* we're not reallocating at each consumption so that we don't trash due to byte by byte consumption */
+                // we're not reallocating at each consumption so that we don't trash due to byte by byte consumption
                 if (http_instance->received_bytes_count == 0)
                 {
                     free(http_instance->received_bytes);
@@ -710,7 +1312,7 @@ static int conn_receive(HTTP_HANDLE_DATA* http_instance, char* buffer, int count
 
 static void on_send_complete(void* context, IO_SEND_RESULT send_result)
 {
-    /* If a send is complete we'll simply signal this by changing the send all state */
+    // If a send is complete we'll simply signal this by changing the send all state
     HTTP_HANDLE_DATA* http_instance = (HTTP_HANDLE_DATA*)context;
     if (send_result == IO_SEND_OK)
     {
@@ -739,12 +1341,12 @@ static int conn_send_all(HTTP_HANDLE_DATA* http_instance, char* buffer, int coun
         }
         else
         {
-            /* We have to loop in here until all bytes are sent or we encounter an error. */
+            // We have to loop in here until all bytes are sent or we encounter an error.
             while (1)
             {
                 xio_dowork(http_instance->xio_handle);
 
-                /* If we got an error signalled from the underlying IO we simply report it up */
+                // If we got an error signalled from the underlying IO we simply report it up
                 if (http_instance->is_io_error)
                 {
                     http_instance->send_all_result = SEND_ALL_RESULT_ERROR;
@@ -756,15 +1358,15 @@ static int conn_send_all(HTTP_HANDLE_DATA* http_instance, char* buffer, int coun
                     break;
                 }
 
-                /* We yield the CPU for a bit so others can do their work */
+                // We yield the CPU for a bit so others can do their work
                 ThreadAPI_Sleep(1);
             }
 
-            /* The send_all_result indicates what is the status for the send operation.
-               Not started - means nothing should happen since no send was started
-               Pending - a send was started, but it is still being carried out 
-               Ok - Send complete
-               Error - error */
+            // The send_all_result indicates what is the status for the send operation.
+            //   Not started - means nothing should happen since no send was started
+            //   Pending - a send was started, but it is still being carried out 
+            //   Ok - Send complete
+            //   Error - error
             switch (http_instance->send_all_result)
             {
                 default:
@@ -847,7 +1449,7 @@ static int skipN(HTTP_HANDLE_DATA* http_instance, size_t n, char* buf, size_t si
         return -1;
 
     return org;
-}
+}*/
 
 HTTPAPI_RESULT HTTPAPI_SetOption(HTTP_HANDLE handle, const char* optionName, const void* value)
 {
