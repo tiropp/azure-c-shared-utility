@@ -83,7 +83,7 @@ HTTPAPI_RESULT HTTPAPI_ExecuteRequestAsync(HTTP_HANDLE handle, HTTPAPI_REQUEST_T
 **SRS_XIO_07_009: [**If the parameters handle or relativePath are NULL, HTTPAPI_ExecuteRequestAsync shall return HTTPAPI_INVALID_ARG.**]**  
 **SRS_XIO_07_010: [**If the parameters content is not NULL and contentLength is NULL or content is NULL and contentLength is not NULL, HTTPAPI_ExecuteRequestAsync shall return HTTPAPI_INVALID_ARG.**]**  
 **SRS_XIO_07_011: [**If the requestType is not a valid request HTTPAPI_ExecuteRequestAsync shall return HTTPAPI_ERROR.**]**  
-**SRS_XIO_07_012: [**HTTPAPI_ExecuteRequestAsync shall add the Content-Length http header item to the request if the contentLength is > 0 (rfc7230 3.3.2).**]**  
+**SRS_XIO_07_012: [**HTTPAPI_ExecuteRequestAsync shall add the Content-Length http header item to the request if the length of the content is > 0 (rfc7230 3.3.2).**]**  
 **SRS_XIO_07_013: [**If HTTPAPI_ExecuteRequestAsync is called before a previous call is incomplete, HTTPAPI_ExecuteRequestAsync shall return HTTPAPI_ALREADY_INIT.**]**  
 **SRS_XIO_07_014: [**HTTPAPI_ExecuteRequestAsync shall add the HOST http header item to the request if not supplied (rfc7230 5.4).**]**  
 

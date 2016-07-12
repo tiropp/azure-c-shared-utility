@@ -563,15 +563,17 @@ static int write_http_text(HTTP_HANDLE_DATA* http_data, const char* writeText)
 
 static int construct_http_headers(HTTP_HEADERS_HANDLE httpHeaderHandle, size_t contentLen, STRING_HANDLE buffData, bool chunkData)
 {
-    int result = 0;
-    size_t headerCnt;
-    if (HTTPHeaders_GetHeaderCount(httpHeaderHandle, &headerCnt) != HTTP_HEADERS_OK)
+    int result;
+    size_t headerCnt = 0;
+    if (httpHeaderHandle != NULL && HTTPHeaders_GetHeaderCount(httpHeaderHandle, &headerCnt) != HTTP_HEADERS_OK)
     {
+        LogError("Failed retrieving http header count.");
         result = __LINE__;
     }
     else
     {
-        //bool hostNameFound = false;
+        result = 0;
+        bool hostNameFound = false;
         for (size_t index = 0; index < headerCnt && result == 0; index++)
         {
             char* header;
@@ -594,6 +596,10 @@ static int construct_http_headers(HTTP_HEADERS_HANDLE httpHeaderHandle, size_t c
                     if (strcmp(header, HTTP_CONTENT_LEN) == 0)
                     {
 
+                    }
+                    else if (strcmp(header, HTTP_CONTENT_LEN) == 0)
+                    {
+                        hostNameFound = true;
                     }
 
                     if (snprintf(sendData, dataLen+1, "%s\r\n", header) <= 0)
@@ -698,7 +704,6 @@ static STRING_HANDLE build_http_request(HTTPAPI_REQUEST_TYPE requestType, const 
                 {
                     STRING_delete(result);
                     result = NULL;
-                    LogError("Failure writing request buffer");
                 }
             }
             free(request);
@@ -781,6 +786,15 @@ HTTP_HANDLE HTTPAPI_CreateConnection_new(XIO_HANDLE io_handle, const char* hostN
                 http_data->received_bytes = NULL;
                 //handle->send_all_result = SEND_ALL_RESULT_NOT_STARTED;
                 http_data->certificate = NULL;
+                http_data->recvMsg.recvState = state_initial;
+                http_data->recvMsg.statusCode = 0;
+                http_data->recvMsg.totalBodyLen = 0;
+                http_data->recvMsg.storedBytes = NULL;
+                http_data->recvMsg.storedLen = 0;;
+                http_data->recvMsg.fn_execute_complete = NULL;
+                http_data->recvMsg.execute_ctx = NULL;
+                http_data->recvMsg.chunkedReply = false;
+
             }
         }
     }
