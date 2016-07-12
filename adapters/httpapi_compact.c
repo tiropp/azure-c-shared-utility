@@ -26,6 +26,7 @@
 
 static const char* HTTP_REQUEST_LINE_FMT = "%s %s HTTP/1.1\r\n";
 static const char* HTTP_CONTENT_LEN = "Content-Length";
+static const char* HTTP_HOST_HEADER = "Host";
 static const char* HTTP_CHUNKED_ENCODING_HDR = "Transfer-Encoding: chunked\r\n";
 static const char* HTTP_CRLF_VALUE = "\r\n";
 static const char* FORMAT_HEX_CHAR = "0x%02x ";
@@ -561,7 +562,7 @@ static int write_http_text(HTTP_HANDLE_DATA* http_data, const char* writeText)
     return result;
 }
 
-static int construct_http_headers(HTTP_HEADERS_HANDLE httpHeaderHandle, size_t contentLen, STRING_HANDLE buffData, bool chunkData)
+static int construct_http_headers(HTTPAPI_REQUEST_TYPE requestType, HTTP_HEADERS_HANDLE httpHeaderHandle, size_t contentLen, STRING_HANDLE buffData, const char* hostname, bool chunkData)
 {
     int result;
     size_t headerCnt = 0;
@@ -574,6 +575,7 @@ static int construct_http_headers(HTTP_HEADERS_HANDLE httpHeaderHandle, size_t c
     {
         result = 0;
         bool hostNameFound = false;
+        bool contentLenFound = false;
         for (size_t index = 0; index < headerCnt && result == 0; index++)
         {
             char* header;
@@ -595,9 +597,9 @@ static int construct_http_headers(HTTP_HEADERS_HANDLE httpHeaderHandle, size_t c
                 {
                     if (strcmp(header, HTTP_CONTENT_LEN) == 0)
                     {
-
+                        contentLenFound = true;
                     }
-                    else if (strcmp(header, HTTP_CONTENT_LEN) == 0)
+                    else if (strcmp(header, HTTP_HOST_HEADER) == 0)
                     {
                         hostNameFound = true;
                     }
@@ -633,9 +635,32 @@ static int construct_http_headers(HTTP_HEADERS_HANDLE httpHeaderHandle, size_t c
             }
             else
             {
-                size_t fmtLen = strlen(HTTP_CONTENT_LEN)+strlen(HTTP_CRLF_VALUE)+8;
+                if (contentLen > 0 || requestType == HTTPAPI_REQUEST_POST)
+                {
+                    size_t fmtLen = strlen(HTTP_CONTENT_LEN)+strlen(HTTP_CRLF_VALUE)+10;
+                    char* content = malloc(fmtLen+1);
+                    if (sprintf(content, "%s: %d%s", HTTP_CONTENT_LEN, (int)contentLen, HTTP_CRLF_VALUE) <= 0)
+                    {
+                        result = __LINE__;
+                        LogError("Failed allocating content len header data");
+                    }
+                    else
+                    {
+                        if (STRING_concat(buffData, content) != 0)
+                        {
+                            result = __LINE__;
+                            LogError("Failed building content len header data");
+                        }
+                    }
+                    free(content);
+                }
+            }
+
+            if (!hostNameFound)
+            {
+                size_t fmtLen = strlen(HTTP_HOST_HEADER)+strlen(HTTP_CRLF_VALUE)+strlen(hostname)+2;
                 char* content = malloc(fmtLen+1);
-                if (sprintf(content, "%s: %d%s", HTTP_CONTENT_LEN, (int)contentLen, HTTP_CRLF_VALUE) <= 0)
+                if (sprintf(content, "%s: %s%s", HTTP_HOST_HEADER, hostname, HTTP_CRLF_VALUE) <= 0)
                 {
                     result = __LINE__;
                     LogError("Failed allocating content len header data");
@@ -651,6 +676,7 @@ static int construct_http_headers(HTTP_HEADERS_HANDLE httpHeaderHandle, size_t c
                 free(content);
             }
 
+
             if (STRING_concat(buffData, "\r\n") != 0)
             {
                 result = __LINE__;
@@ -661,7 +687,7 @@ static int construct_http_headers(HTTP_HEADERS_HANDLE httpHeaderHandle, size_t c
     return result;
 }
 
-static STRING_HANDLE build_http_request(HTTPAPI_REQUEST_TYPE requestType, const char* relativePath, HTTP_HEADERS_HANDLE httpHeadersHandle, size_t contentLength, bool chunkData)
+static STRING_HANDLE build_http_request(HTTPAPI_REQUEST_TYPE requestType, const char* relativePath, HTTP_HEADERS_HANDLE httpHeadersHandle, size_t contentLength, const char* hostname, bool chunkData)
 {
     STRING_HANDLE result;
 
@@ -700,7 +726,7 @@ static STRING_HANDLE build_http_request(HTTPAPI_REQUEST_TYPE requestType, const 
                 {
                     LogError("Failure creating buffer object");
                 }
-                else if (construct_http_headers(httpHeadersHandle, contentLength, result, chunkData) != 0)
+                else if (construct_http_headers(requestType, httpHeadersHandle, contentLength, result, hostname, chunkData) != 0)
                 {
                     STRING_delete(result);
                     result = NULL;
@@ -716,7 +742,7 @@ static int send_http_data(HTTP_HANDLE_DATA* http_data, HTTPAPI_REQUEST_TYPE requ
     HTTP_HEADERS_HANDLE httpHeadersHandle, size_t contentLength, bool sendChunked)
 {
     int result;
-    STRING_HANDLE httpData = build_http_request(requestType, relativePath, httpHeadersHandle, contentLength, sendChunked);
+    STRING_HANDLE httpData = build_http_request(requestType, relativePath, httpHeadersHandle, contentLength, http_data->hostname, sendChunked);
     if (httpData == NULL)
     {
         result = __LINE__;
