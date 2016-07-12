@@ -64,7 +64,7 @@ DEFINE_ENUM(HTTPAPI_RESULT, HTTPAPI_RESULT_VALUES);
     HTTPAPI_REQUEST_DELETE,         \
     HTTPAPI_REQUEST_PATCH           \
 
-typedef void(*ON_EXECUTE_COMPLETE)(void* callback_context, HTTPAPI_RESULT execute_result, unsigned int statusCode, HTTP_HEADERS_HANDLE responseHeadersHandle, BUFFER_HANDLE responseContent);
+typedef void(*ON_EXECUTE_COMPLETE)(void* callback_context, HTTPAPI_RESULT execute_result, unsigned int statusCode, HTTP_HEADERS_HANDLE respHeader, const unsigned char* response, size_t responseLen);
 
 /** @brief Enumeration specifying the HTTP request verbs accepted by
  *	the HTTPAPI module.
@@ -100,7 +100,7 @@ MOCKABLE_FUNCTION(, void, HTTPAPI_Deinit);
  */
 MOCKABLE_FUNCTION(, HTTP_HANDLE, HTTPAPI_CreateConnection, const char*, hostName);
 
-MOCKABLE_FUNCTION(, HTTP_HANDLE, HTTPAPI_CreateConnection_new, XIO_HANDLE, io, const char*, hostName);
+MOCKABLE_FUNCTION(, HTTP_HANDLE, HTTPAPI_CreateConnection_new, XIO_HANDLE, xio, const char*, hostName);
 
 /**
  * @brief	Closes a connection created with ::HTTPAPI_CreateConnection.

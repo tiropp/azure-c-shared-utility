@@ -18,7 +18,6 @@
 #include "azure_c_shared_utility/platform.h"
 #include "azure_c_shared_utility/tlsio.h"
 #include "azure_c_shared_utility/strings.h"
-//#include <string.h>
 
 #define MAX_HOSTNAME_LEN        65
 #define TEMP_BUFFER_SIZE        4096
@@ -31,17 +30,7 @@ static const char* HTTP_CHUNKED_ENCODING_HDR = "Transfer-Encoding: chunked\r\n";
 static const char* HTTP_CRLF_VALUE = "\r\n";
 static const char* FORMAT_HEX_CHAR = "0x%02x ";
 
-#define CHAR_COUNT(A)   (sizeof(A) - 1)
-
 DEFINE_ENUM_STRINGS(HTTPAPI_RESULT, HTTPAPI_RESULT_VALUES)
-
-typedef enum SEND_ALL_RESULT_TAG
-{
-    SEND_ALL_RESULT_NOT_STARTED,
-    SEND_ALL_RESULT_PENDING,
-    SEND_ALL_RESULT_OK,
-    SEND_ALL_RESULT_ERROR
-} SEND_ALL_RESULT;
 
 typedef enum RESPONSE_MESSAGE_STATE_TAG
 {
@@ -74,8 +63,6 @@ typedef struct HTTP_HANDLE_DATA_TAG
     XIO_HANDLE xio_handle;
     size_t received_bytes_count;
     unsigned char*  received_bytes;
-    SEND_ALL_RESULT send_all_result;
-
     HTTP_RECV_DATA recvMsg;
     unsigned int is_io_error : 1;
     unsigned int is_connected : 1;
@@ -279,7 +266,7 @@ static void on_bytes_recv(void* context, const unsigned char* buffer, size_t len
     size_t index = 0;
     HTTPAPI_RESULT execute_result;
 
-    if (http_data != NULL && buffer != NULL && len > 0 && http_data->recvMsg.recvState != state_error)
+    if (http_data != NULL && buffer != NULL && len > 0 && http_data->recvMsg.recvState != state_error && http_data->recvMsg.fn_execute_complete != NULL)
     {
         if (http_data->recvMsg.recvState == state_initial)
         {
@@ -356,7 +343,7 @@ static void on_bytes_recv(void* context, const unsigned char* buffer, size_t len
                     {
                         // Content len is 0 so we are finished with the body
                         execute_result = HTTPAPI_OK;
-                        http_data->recvMsg.fn_execute_complete(http_data->recvMsg.execute_ctx, execute_result, http_data->recvMsg.statusCode, http_data->recvMsg.respHeader, NULL);
+                        http_data->recvMsg.fn_execute_complete(http_data->recvMsg.execute_ctx, execute_result, http_data->recvMsg.statusCode, http_data->recvMsg.respHeader, NULL, 0);
                         http_data->recvMsg.recvState = state_message_body;
                     }
                 }
@@ -401,8 +388,7 @@ static void on_bytes_recv(void* context, const unsigned char* buffer, size_t len
                 if (parseSuccess)
                 {
                     execute_result = HTTPAPI_OK;
-                    http_data->recvMsg.fn_execute_complete(http_data->recvMsg.execute_ctx, execute_result, http_data->recvMsg.statusCode, http_data->recvMsg.respHeader, NULL);
-                    //http_data->fnReplyCallback((HTTP_CLIENT_HANDLE)data, http_data->userCtx, BUFFER_u_char(http_data->recvMsg.msgBody), BUFFER_length(http_data->recvMsg.msgBody), http_data->recvMsg.statusCode, http_data->recvMsg.respHeader);
+                    http_data->recvMsg.fn_execute_complete(http_data->recvMsg.execute_ctx, execute_result, http_data->recvMsg.statusCode, http_data->recvMsg.respHeader, BUFFER_u_char(http_data->recvMsg.msgBody), BUFFER_length(http_data->recvMsg.msgBody) );
                     http_data->recvMsg.recvState = state_message_body;
                 }
             }
@@ -531,7 +517,7 @@ static int write_http_data(HTTP_HANDLE_DATA* http_data, const unsigned char* wri
         {
             char timeResult[TIME_MAX_BUFFER];
             getLogTime(timeResult, TIME_MAX_BUFFER);
-            LOG(LOG_INFO, LOG_LINE, "%s", timeResult);
+            LOG(LOG_TRACE, LOG_LINE, "%s", timeResult);
             for (size_t index = 0; index < length; index++)
             {
                 LOG(LOG_TRACE, 0, "0x%02x ", writeData[index]);
@@ -555,7 +541,7 @@ static int write_http_text(HTTP_HANDLE_DATA* http_data, const char* writeText)
         {
             char timeResult[TIME_MAX_BUFFER];
             getLogTime(timeResult, TIME_MAX_BUFFER);
-            LOG(LOG_INFO, LOG_LINE, "%s", timeResult);
+            LOG(LOG_TRACE, LOG_LINE, "%s", timeResult);
             LOG(LOG_TRACE, LOG_LINE, "%s", writeText);
         }
     }
@@ -635,7 +621,7 @@ static int construct_http_headers(HTTPAPI_REQUEST_TYPE requestType, HTTP_HEADERS
             }
             else
             {
-                if (contentLen > 0 || requestType == HTTPAPI_REQUEST_POST)
+                if (contentLenFound && (contentLen > 0 || requestType == HTTPAPI_REQUEST_POST) )
                 {
                     size_t fmtLen = strlen(HTTP_CONTENT_LEN)+strlen(HTTP_CRLF_VALUE)+10;
                     char* content = malloc(fmtLen+1);
@@ -769,10 +755,10 @@ HTTP_HANDLE HTTPAPI_CreateConnection(const char* hostName)
     return NULL;
 }
 
-HTTP_HANDLE HTTPAPI_CreateConnection_new(XIO_HANDLE io_handle, const char* hostName)
+HTTP_HANDLE HTTPAPI_CreateConnection_new(XIO_HANDLE xio, const char* hostName)
 {
     HTTP_HANDLE_DATA* http_data = NULL;
-    if (hostName == NULL || io_handle == NULL)
+    if (hostName == NULL || xio == NULL)
     {
         LogInfo("Failure: invalid parameter was NULL");
     }
@@ -789,7 +775,7 @@ HTTP_HANDLE HTTPAPI_CreateConnection_new(XIO_HANDLE io_handle, const char* hostN
         }
         else
         {
-            http_data->xio_handle = io_handle;
+            http_data->xio_handle = xio;
 
             if (mallocAndStrcpy_s(&http_data->hostname, hostName) != 0)
             {
@@ -812,15 +798,15 @@ HTTP_HANDLE HTTPAPI_CreateConnection_new(XIO_HANDLE io_handle, const char* hostN
                 http_data->received_bytes = NULL;
                 //handle->send_all_result = SEND_ALL_RESULT_NOT_STARTED;
                 http_data->certificate = NULL;
+                memset(&http_data->recvMsg, 0, sizeof(HTTP_RECV_DATA) );
                 http_data->recvMsg.recvState = state_initial;
-                http_data->recvMsg.statusCode = 0;
+                /*http_data->recvMsg.statusCode = 0;
                 http_data->recvMsg.totalBodyLen = 0;
                 http_data->recvMsg.storedBytes = NULL;
                 http_data->recvMsg.storedLen = 0;;
                 http_data->recvMsg.fn_execute_complete = NULL;
-                http_data->recvMsg.execute_ctx = NULL;
+                http_data->recvMsg.execute_ctx = NULL;*/
                 http_data->recvMsg.chunkedReply = false;
-
             }
         }
     }

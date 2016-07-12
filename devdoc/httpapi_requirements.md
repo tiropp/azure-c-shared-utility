@@ -19,7 +19,7 @@ Proxy: https://tools.ietf.org/html/rfc7235.pdf
 ```c
 typedef struct HTTP_HANDLE_DATA_TAG* HTTP_HANDLE;
 
-typedef void(*ON_EXECUTE_COMPLETE)(void* callback_context, unsigned int statusCode, HTTP_HEADERS_HANDLE responseHeadersHandle, BUFFER_HANDLE responseContent);
+typedef void(*ON_EXECUTE_COMPLETE)(void* callback_context, HTTPAPI_RESULT execute_result, unsigned int statusCode, HTTP_HEADERS_HANDLE respHeader, const unsigned char* response, size_t responseLen);
 
 #define HTTPAPI_RESULT_VALUES                \
 HTTPAPI_OK,                                  \
@@ -44,7 +44,7 @@ DEFINE_ENUM(HTTPAPI_RESULT, HTTPAPI_RESULT_VALUES);
 
 DEFINE_ENUM(HTTPAPI_REQUEST_TYPE, HTTPAPI_REQUEST_TYPE_VALUES);
 
-MOCKABLE_FUNCTION(, HTTP_HANDLE, HTTPAPI_CreateConnection, const char*, hostName);
+MOCKABLE_FUNCTION(, HTTP_HANDLE, HTTPAPI_CreateConnection, XIO_HANDLE, xio, const char*, hostName);
 
 MOCKABLE_FUNCTION(, void, HTTPAPI_CloseConnection, HTTP_HANDLE, handle);
 
@@ -59,7 +59,7 @@ MOCKABLE_FUNCTION(, HTTPAPI_RESULT, HTTPAPI_CloneOption, const char*, optionName
 
 ###HTTPAPI_CreateConnection
 ```c
-HTTP_HANDLE HTTPAPI_CreateConnection(XIO_HANDLE io, const char* hostName)
+HTTP_HANDLE HTTPAPI_CreateConnection(XIO_HANDLE xio, const char* hostName)
 ```
 **SRS_XIO_07_001: [**HTTPAPI_CreateConnection shall return on success a non-NULL handle to the HTTP interface.**]**  
 **SRS_XIO_07_002: [**If any argument is NULL, HTTPAPI_CreateConnection shall return a NULL handle.**]**  
