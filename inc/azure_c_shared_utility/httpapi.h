@@ -98,9 +98,7 @@ MOCKABLE_FUNCTION(, void, HTTPAPI_Deinit);
  * @return	A @c HTTP_HANDLE to the newly created connection or @c NULL in
  * 			case an error occurs.
  */
-MOCKABLE_FUNCTION(, HTTP_HANDLE, HTTPAPI_CreateConnection, const char*, hostName);
-
-MOCKABLE_FUNCTION(, HTTP_HANDLE, HTTPAPI_CreateConnection_new, XIO_HANDLE, xio, const char*, hostName);
+MOCKABLE_FUNCTION(, HTTP_HANDLE, HTTPAPI_CreateConnection, XIO_HANDLE, xio, const char*, hostName);
 
 /**
  * @brief	Closes a connection created with ::HTTPAPI_CreateConnection.

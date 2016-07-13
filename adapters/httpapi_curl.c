@@ -82,8 +82,9 @@ void HTTPAPI_Deinit(void)
     }
 }
 
-HTTP_HANDLE HTTPAPI_CreateConnection(const char* hostName)
+HTTP_HANDLE HTTPAPI_CreateConnection(XIO_HANDLE xio, const char* hostName)
 {
+    (void)xio;
     HTTP_HANDLE_DATA* httpHandleData;
 
     if (hostName == NULL)
