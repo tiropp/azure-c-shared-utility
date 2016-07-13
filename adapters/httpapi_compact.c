@@ -19,6 +19,7 @@
 #include "azure_c_shared_utility/platform.h"
 #include "azure_c_shared_utility/tlsio.h"
 #include "azure_c_shared_utility/strings.h"
+#include "azure_c_shared_utility/constbuffer.h"
 
 #define MAX_HOSTNAME_LEN        65
 #define TEMP_BUFFER_SIZE        4096
@@ -344,7 +345,7 @@ static void on_bytes_recv(void* context, const unsigned char* buffer, size_t len
                     {
                         // Content len is 0 so we are finished with the body
                         execute_result = HTTPAPI_OK;
-                        http_data->recvMsg.fn_execute_complete(http_data->recvMsg.execute_ctx, execute_result, http_data->recvMsg.statusCode, http_data->recvMsg.respHeader, NULL, 0);
+                        http_data->recvMsg.fn_execute_complete(http_data->recvMsg.execute_ctx, execute_result, http_data->recvMsg.statusCode, http_data->recvMsg.respHeader, NULL);
                         http_data->recvMsg.recvState = state_message_body;
                     }
                 }
@@ -388,9 +389,18 @@ static void on_bytes_recv(void* context, const unsigned char* buffer, size_t len
                 }
                 if (parseSuccess)
                 {
-                    execute_result = HTTPAPI_OK;
-                    http_data->recvMsg.fn_execute_complete(http_data->recvMsg.execute_ctx, execute_result, http_data->recvMsg.statusCode, http_data->recvMsg.respHeader, BUFFER_u_char(http_data->recvMsg.msgBody), BUFFER_length(http_data->recvMsg.msgBody) );
-                    http_data->recvMsg.recvState = state_message_body;
+                    CONSTBUFFER_HANDLE response = CONSTBUFFER_CreateFromBuffer(http_data->recvMsg.msgBody);
+                    if (response == NULL)
+                    {
+                        // DO some error here
+                    }
+                    else
+                    {
+                        execute_result = HTTPAPI_OK;
+                        http_data->recvMsg.fn_execute_complete(http_data->recvMsg.execute_ctx, execute_result, http_data->recvMsg.statusCode, http_data->recvMsg.respHeader, response);
+                        http_data->recvMsg.recvState = state_message_body;
+                        CONSTBUFFER_Destroy(response);
+                    }
                 }
             }
             else
@@ -679,11 +689,13 @@ static STRING_HANDLE build_http_request(HTTPAPI_REQUEST_TYPE requestType, const 
     STRING_HANDLE result;
 
     const char* method = (requestType == HTTPAPI_REQUEST_GET) ? "GET"
-        : (requestType == HTTPAPI_REQUEST_OPTIONS) ? "OPTIONS"
+        : (requestType == HTTPAPI_REQUEST_HEAD) ? "HEAD"
         : (requestType == HTTPAPI_REQUEST_POST) ? "POST"
         : (requestType == HTTPAPI_REQUEST_PUT) ? "PUT"
         : (requestType == HTTPAPI_REQUEST_DELETE) ? "DELETE"
-        : (requestType == HTTPAPI_REQUEST_PATCH) ? "PATCH"
+        : (requestType == HTTPAPI_REQUEST_CONNECT) ? "CONNECT"
+        : (requestType == HTTPAPI_REQUEST_OPTIONS) ? "OPTIONS"
+        : (requestType == HTTPAPI_REQUEST_OPTIONS) ? "TRACE"
         : NULL;
     if (method == NULL)
     {
@@ -808,7 +820,7 @@ void HTTPAPI_CloseConnection(HTTP_HANDLE handle)
     {
         if (http_data->xio_handle != NULL)
         {
-            (int)xio_close(http_data->xio_handle, NULL, NULL);
+            (void)xio_close(http_data->xio_handle, NULL, NULL);
         }
         if (http_data->certificate)
         {
@@ -836,7 +848,8 @@ HTTPAPI_RESULT HTTPAPI_ExecuteRequest(HTTP_HANDLE handle, HTTPAPI_REQUEST_TYPE r
     (void)content;
     (void)contentLength;
     (void)statusCode;
-    (void)responseHeadersHandle;(void)responseContent;
+    (void)responseHeadersHandle;
+    (void)responseContent;
 
     HTTPAPI_RESULT result = HTTPAPI_ERROR;
     return result;
@@ -856,7 +869,7 @@ HTTPAPI_RESULT HTTPAPI_ExecuteRequestAsync(HTTP_HANDLE handle, HTTPAPI_REQUEST_T
     }
     else if (http_data->recvMsg.recvState != state_initial)
     {
-        result = HTTPAPI_ALREADY_INIT;
+        result = HTTPAPI_IN_PROGRESS;
     }
     else
     {

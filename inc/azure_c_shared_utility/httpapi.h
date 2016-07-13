@@ -15,7 +15,7 @@
 
 #include "azure_c_shared_utility/httpheaders.h"
 #include "azure_c_shared_utility/macro_utils.h"
-#include "azure_c_shared_utility/buffer_.h"
+#include "azure_c_shared_utility/constbuffer.h"
 #include "azure_c_shared_utility/umock_c_prod.h"
 #include "azure_c_shared_utility/xio.h"
 
@@ -36,7 +36,7 @@ HTTPAPI_INVALID_ARG,                         \
 HTTPAPI_ERROR,                               \
 HTTPAPI_OPEN_REQUEST_FAILED,                 \
 HTTPAPI_SET_OPTION_FAILED,                   \
-HTTPAPI_ALREADY_INIT,                        \
+HTTPAPI_IN_PROGRESS,                         \
 HTTPAPI_SET_X509_FAILURE,                    \
 HTTPAPI_SET_TIMEOUTS_FAILED,                 \
 HTTPAPI_SEND_REQUEST_FAILED,                 \
@@ -57,14 +57,16 @@ HTTPAPI_INSUFFICIENT_RESPONSE_BUFFER         \
 DEFINE_ENUM(HTTPAPI_RESULT, HTTPAPI_RESULT_VALUES);
 
 #define HTTPAPI_REQUEST_TYPE_VALUES \
-    HTTPAPI_REQUEST_OPTIONS,        \
     HTTPAPI_REQUEST_GET,            \
+    HTTPAPI_REQUEST_HEAD,           \
     HTTPAPI_REQUEST_POST,           \
     HTTPAPI_REQUEST_PUT,            \
     HTTPAPI_REQUEST_DELETE,         \
-    HTTPAPI_REQUEST_PATCH           \
+    HTTPAPI_REQUEST_CONNECT,        \
+    HTTPAPI_REQUEST_OPTIONS,        \
+    HTTPAPI_REQUEST_TRACE           \
 
-typedef void(*ON_EXECUTE_COMPLETE)(void* callback_context, HTTPAPI_RESULT execute_result, unsigned int statusCode, HTTP_HEADERS_HANDLE respHeader, const unsigned char* response, size_t responseLen);
+typedef void(*ON_EXECUTE_COMPLETE)(void* callback_context, HTTPAPI_RESULT execute_result, unsigned int statusCode, HTTP_HEADERS_HANDLE respHeader, CONSTBUFFER_HANDLE responseBuffer);
 
 /** @brief Enumeration specifying the HTTP request verbs accepted by
  *	the HTTPAPI module.
