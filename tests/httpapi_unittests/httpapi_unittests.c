@@ -76,6 +76,7 @@ static TEST_MUTEX_HANDLE g_dllByDll;
 static TEST_MUTEX_HANDLE test_serialize_mutex;
 
 static bool g_string_construct_fails = false;
+static size_t g_header_count = 0;
 
 static const size_t TEXT_CONTENT_LENGTH = 70;
 
@@ -109,11 +110,51 @@ static void my_HTTPHeaders_Free(HTTP_HEADERS_HANDLE h)
 
 static HTTP_HEADERS_RESULT my_HTTPHeaders_GetHeader(HTTP_HEADERS_HANDLE handle, size_t index, char** destination)
 {
-    handle, size_t index, char** destination
-    return HTTP_HEADERS_OK;
+    (void)handle;
+    HTTP_HEADERS_RESULT hdr_result;
+    const char* header_value;
+    switch (index)
+    {
+        case 0:
+            header_value = "Authorization: ";
+            break;
+        case 1:
+            header_value = "Accept: application/json";
+            break;
+        case 2:
+            header_value = "Host: iot-sdks-test.azure-devices.net";
+            break;
+        case 3:
+            header_value = "connection: Keep-Alive";
+            break;
+        case 4:
+            header_value = "If-Match: \"*\"";
+            break;
+        case 5:
+        default:
+            header_value = "UserAgent: Microsoft.Azure.Devices/1.0.4";
+            break;
+    }
+    size_t len = strlen(header_value);
+    *destination = (char*)malloc(len+1);
+    if (*destination != NULL)
+    {
+        strcpy(*destination, header_value);
+        hdr_result = HTTP_HEADERS_OK;
+    }
+    else
+    {
+        hdr_result = HTTP_HEADERS_ERROR;
+    }
+    return hdr_result;
 }
 
-my_HTTPHeaders_GetHeaderCount
+HTTP_HEADERS_RESULT my_HTTPHeaders_GetHeaderCount(HTTP_HEADERS_HANDLE handle, size_t* headerCount)
+{
+    (void)handle;
+    *headerCount = g_header_count;
+    return HTTP_HEADERS_OK;
+}
 
 BUFFER_HANDLE my_BUFFER_new(void)
 {
