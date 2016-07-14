@@ -34,20 +34,21 @@ typedef struct HTTP_HANDLE_DATA_TAG* HTTP_HANDLE;
 HTTPAPI_OK,                                  \
 HTTPAPI_INVALID_ARG,                         \
 HTTPAPI_ERROR,                               \
-HTTPAPI_OPEN_REQUEST_FAILED,                 \
 HTTPAPI_SET_OPTION_FAILED,                   \
 HTTPAPI_IN_PROGRESS,                         \
 HTTPAPI_SET_X509_FAILURE,                    \
 HTTPAPI_SET_TIMEOUTS_FAILED,                 \
 HTTPAPI_SEND_REQUEST_FAILED,                 \
+HTTPAPI_ALLOC_FAILED,                        \
+HTTPAPI_STRING_PROCESSING_ERROR,             \
+HTTPAPI_HTTP_HEADERS_FAILED,                 \
+HTTPAPI,                 \
+HTTPAPI_OPEN_REQUEST_FAILED,                 \
 HTTPAPI_RECEIVE_RESPONSE_FAILED,             \
 HTTPAPI_QUERY_HEADERS_FAILED,                \
 HTTPAPI_QUERY_DATA_AVAILABLE_FAILED,         \
 HTTPAPI_READ_DATA_FAILED,                    \
 HTTPAPI_NOT_INIT,                            \
-HTTPAPI_HTTP_HEADERS_FAILED,                 \
-HTTPAPI_STRING_PROCESSING_ERROR,             \
-HTTPAPI_ALLOC_FAILED,                        \
 HTTPAPI_INIT_FAILED,                         \
 HTTPAPI_INSUFFICIENT_RESPONSE_BUFFER         \
 
@@ -66,12 +67,12 @@ DEFINE_ENUM(HTTPAPI_RESULT, HTTPAPI_RESULT_VALUES);
     HTTPAPI_REQUEST_OPTIONS,        \
     HTTPAPI_REQUEST_TRACE           \
 
-typedef void(*ON_EXECUTE_COMPLETE)(void* callback_context, HTTPAPI_RESULT execute_result, unsigned int statusCode, HTTP_HEADERS_HANDLE respHeader, CONSTBUFFER_HANDLE responseBuffer);
-
 /** @brief Enumeration specifying the HTTP request verbs accepted by
  *	the HTTPAPI module.
  */
 DEFINE_ENUM(HTTPAPI_REQUEST_TYPE, HTTPAPI_REQUEST_TYPE_VALUES);
+
+typedef void(*ON_EXECUTE_COMPLETE)(void* callback_context, HTTPAPI_RESULT execute_result, unsigned int statusCode, HTTP_HEADERS_HANDLE respHeader, CONSTBUFFER_HANDLE responseBuffer);
 
 /**
  * @brief	Global initialization for the HTTP API component.

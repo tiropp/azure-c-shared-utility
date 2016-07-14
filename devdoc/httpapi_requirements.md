@@ -7,16 +7,16 @@ HTTAPI module provides a platform Independent http implementation
 
 ## Reference RFCs
 
-Http: https://tools.ietf.org/html/rfc7230.pdf
-Hostname: https://tools.ietf.org/html/rfc1035.pdf
-100 Continue: https://tools.ietf.org/pdf/rfc7231.pdf
-Proxy: https://tools.ietf.org/html/rfc7235.pdf
+- Http: https://tools.ietf.org/html/rfc7230.pdf
+- Hostname: https://tools.ietf.org/html/rfc1035.pdf
+- 100 Continue: https://tools.ietf.org/pdf/rfc7231.pdf
+- Proxy: https://tools.ietf.org/html/rfc7235.pdf
 
 ## RFC features to be implemented soon
 
-(rfc7230) 6.3 Persistent Connections
-(rfc7231) 6.2.1 100 Continue Response
-(rfc7235) 3.2 Proxy Authentication
+- (rfc7230) 6.3 Persistent Connections
+- (rfc7231) 6.2.1 100 Continue Response
+- (rfc7235) 3.2 Proxy Authentication
 
 ## Exposed API
 
@@ -27,12 +27,14 @@ typedef struct HTTP_HANDLE_DATA_TAG* HTTP_HANDLE;
 HTTPAPI_OK,                                  \
 HTTPAPI_INVALID_ARG,                         \
 HTTPAPI_ERROR,                               \
-HTTPAPI_OPEN_REQUEST_FAILED,                 \
 HTTPAPI_SET_OPTION_FAILED,                   \
 HTTPAPI_IN_PROGRESS,                         \
 HTTPAPI_SET_X509_FAILURE,                    \
 HTTPAPI_SET_TIMEOUTS_FAILED,                 \
-HTTPAPI_SEND_REQUEST_FAILED                  \
+HTTPAPI_SEND_REQUEST_FAILED,                 \
+HTTPAPI_ALLOC_FAILED,                        \
+HTTPAPI_STRING_PROCESSING_ERROR,             \
+HTTPAPI_HTTP_HEADERS_FAILED,                 \
 
 DEFINE_ENUM(HTTPAPI_RESULT, HTTPAPI_RESULT_VALUES);
 
@@ -46,9 +48,9 @@ DEFINE_ENUM(HTTPAPI_RESULT, HTTPAPI_RESULT_VALUES);
     HTTPAPI_REQUEST_OPTIONS,        \
     HTTPAPI_REQUEST_TRACE           \
 
-typedef void(*ON_EXECUTE_COMPLETE)(void* callback_context, HTTPAPI_RESULT execute_result, unsigned int statusCode, HTTP_HEADERS_HANDLE respHeader, CONSTBUFFER_HANDLE responseBuffer);
-
 DEFINE_ENUM(HTTPAPI_REQUEST_TYPE, HTTPAPI_REQUEST_TYPE_VALUES);
+
+typedef void(*ON_EXECUTE_COMPLETE)(void* callback_context, HTTPAPI_RESULT execute_result, unsigned int statusCode, HTTP_HEADERS_HANDLE respHeader, CONSTBUFFER_HANDLE responseBuffer);
 
 MOCKABLE_FUNCTION(, HTTP_HANDLE, HTTPAPI_CreateConnection, XIO_HANDLE, xio, const char*, hostName);
 
@@ -93,7 +95,7 @@ HTTPAPI_RESULT HTTPAPI_ExecuteRequestAsync(HTTP_HANDLE handle, HTTPAPI_REQUEST_T
 ```
 
 **SRS_HTTPAPI_07_009: [**If the parameters handle or relativePath are NULL, HTTPAPI_ExecuteRequestAsync shall return HTTPAPI_INVALID_ARG.**]**  
-**SRS_HTTPAPI_07_010: [**If the parameters content is not NULL and contentLength is NULL or content is NULL and contentLength is not NULL, HTTPAPI_ExecuteRequestAsync shall return HTTPAPI_INVALID_ARG.**]**  
+**SRS_HTTPAPI_07_010: [**If the parameters content is not NULL and contentLength is 0 or content is NULL and contentLength is not 0, HTTPAPI_ExecuteRequestAsync shall return HTTPAPI_INVALID_ARG.**]**  
 **SRS_HTTPAPI_07_011: [**If the requestType is not a valid request HTTPAPI_ExecuteRequestAsync shall return HTTPAPI_INVALID_ARG.**]**
 **SRS_HTTPAPI_07_022: [**HTTPAPI_ExecuteRequestAsync shall support all valid HTTP request types (rfc7231 4.3).**]**  
 **SRS_HTTPAPI_07_012: [**HTTPAPI_ExecuteRequestAsync shall add the Content-Length http header to the request if not supplied and the length of the content is > 0 or the requestType is a POST (rfc7230 3.3.2).**]**  

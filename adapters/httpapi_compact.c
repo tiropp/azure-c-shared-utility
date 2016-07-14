@@ -559,18 +559,18 @@ static int write_http_text(HTTP_HANDLE_DATA* http_data, const char* writeText)
     return result;
 }
 
-static int construct_http_headers(HTTPAPI_REQUEST_TYPE requestType, HTTP_HEADERS_HANDLE httpHeaderHandle, size_t contentLen, STRING_HANDLE buffData, const char* hostname, bool chunkData)
+static HTTPAPI_RESULT construct_http_headers(HTTPAPI_REQUEST_TYPE requestType, HTTP_HEADERS_HANDLE httpHeaderHandle, size_t contentLen, STRING_HANDLE buffData, const char* hostname, bool chunkData)
 {
-    int result;
+    HTTPAPI_RESULT result;
     size_t headerCnt = 0;
     if (httpHeaderHandle != NULL && HTTPHeaders_GetHeaderCount(httpHeaderHandle, &headerCnt) != HTTP_HEADERS_OK)
     {
         LogError("Failed retrieving http header count.");
-        result = __LINE__;
+        result = HTTPAPI_HTTP_HEADERS_FAILED;
     }
     else
     {
-        result = 0;
+        result = HTTPAPI_OK;
         bool hostNameFound = false;
         bool contentLenFound = false;
         for (size_t index = 0; index < headerCnt && result == 0; index++)
@@ -578,7 +578,7 @@ static int construct_http_headers(HTTPAPI_REQUEST_TYPE requestType, HTTP_HEADERS
             char* header;
             if (HTTPHeaders_GetHeader(httpHeaderHandle, index, &header) != HTTP_HEADERS_OK)
             {
-                result = __LINE__;
+                result = HTTPAPI_HTTP_HEADERS_FAILED;
                 LogError("Failed in HTTPHeaders_GetHeader");
             }
             else
@@ -587,7 +587,7 @@ static int construct_http_headers(HTTPAPI_REQUEST_TYPE requestType, HTTP_HEADERS
                 char* sendData = malloc(dataLen+1);
                 if (sendData == NULL)
                 {
-                    result = __LINE__;
+                    result = HTTPAPI_ALLOC_FAILED;
                     LogError("Failed in allocating header data");
                 }
                 else
@@ -603,14 +603,14 @@ static int construct_http_headers(HTTPAPI_REQUEST_TYPE requestType, HTTP_HEADERS
 
                     if (snprintf(sendData, dataLen+1, "%s\r\n", header) <= 0)
                     {
-                        result = __LINE__;
+                        result = HTTPAPI_ERROR;
                         LogError("Failed in constructing header data");
                     }
                     else
                     {
                         if (STRING_concat(buffData, sendData) != 0)
                         {
-                            result = __LINE__;
+                            result = HTTPAPI_STRING_PROCESSING_ERROR;
                             LogError("Failed in building header data");
                         }
                     }
@@ -620,32 +620,32 @@ static int construct_http_headers(HTTPAPI_REQUEST_TYPE requestType, HTTP_HEADERS
             }
         }
 
-        if (result == 0)
+        if (result == HTTPAPI_OK)
         {
             if (chunkData)
             {
                 if (STRING_concat(buffData, HTTP_CHUNKED_ENCODING_HDR) != 0)
                 {
-                    result = __LINE__;
+                    result = HTTPAPI_STRING_PROCESSING_ERROR;
                     LogError("Failed building content len header data");
                 }
             }
             else
             {
-                if (contentLenFound && (contentLen > 0 || requestType == HTTPAPI_REQUEST_POST) )
+                if (!contentLenFound && (contentLen > 0 || requestType == HTTPAPI_REQUEST_POST) )
                 {
                     size_t fmtLen = strlen(HTTP_CONTENT_LEN)+strlen(HTTP_CRLF_VALUE)+10;
                     char* content = malloc(fmtLen+1);
                     if (sprintf(content, "%s: %d%s", HTTP_CONTENT_LEN, (int)contentLen, HTTP_CRLF_VALUE) <= 0)
                     {
-                        result = __LINE__;
+                        result = HTTPAPI_STRING_PROCESSING_ERROR;
                         LogError("Failed allocating content len header data");
                     }
                     else
                     {
                         if (STRING_concat(buffData, content) != 0)
                         {
-                            result = __LINE__;
+                            result = HTTPAPI_STRING_PROCESSING_ERROR;
                             LogError("Failed building content len header data");
                         }
                     }
@@ -659,14 +659,14 @@ static int construct_http_headers(HTTPAPI_REQUEST_TYPE requestType, HTTP_HEADERS
                 char* content = malloc(fmtLen+1);
                 if (sprintf(content, "%s: %s%s", HTTP_HOST_HEADER, hostname, HTTP_CRLF_VALUE) <= 0)
                 {
-                    result = __LINE__;
+                    result = HTTPAPI_STRING_PROCESSING_ERROR;
                     LogError("Failed allocating content len header data");
                 }
                 else
                 {
                     if (STRING_concat(buffData, content) != 0)
                     {
-                        result = __LINE__;
+                        result = HTTPAPI_STRING_PROCESSING_ERROR;
                         LogError("Failed building content len header data");
                     }
                 }
@@ -676,7 +676,7 @@ static int construct_http_headers(HTTPAPI_REQUEST_TYPE requestType, HTTP_HEADERS
 
             if (STRING_concat(buffData, "\r\n") != 0)
             {
-                result = __LINE__;
+                result = HTTPAPI_STRING_PROCESSING_ERROR;
                 LogError("Failed sending header finalization data");
             }
         }
@@ -684,78 +684,71 @@ static int construct_http_headers(HTTPAPI_REQUEST_TYPE requestType, HTTP_HEADERS
     return result;
 }
 
-static STRING_HANDLE build_http_request(HTTPAPI_REQUEST_TYPE requestType, const char* relativePath, HTTP_HEADERS_HANDLE httpHeadersHandle, size_t contentLength, const char* hostname, bool chunkData)
+static STRING_HANDLE build_http_request(HTTPAPI_REQUEST_TYPE requestType, const char* relativePath, HTTP_HEADERS_HANDLE httpHeadersHandle, size_t contentLength, const char* hostname, bool chunkData, HTTPAPI_RESULT* httpapi_result)
 {
     STRING_HANDLE result;
 
-    const char* method = (requestType == HTTPAPI_REQUEST_GET) ? "GET"
-        : (requestType == HTTPAPI_REQUEST_HEAD) ? "HEAD"
+    // Get the Method to be used
+    const char* method = (requestType == HTTPAPI_REQUEST_HEAD) ? "HEAD"
         : (requestType == HTTPAPI_REQUEST_POST) ? "POST"
         : (requestType == HTTPAPI_REQUEST_PUT) ? "PUT"
         : (requestType == HTTPAPI_REQUEST_DELETE) ? "DELETE"
         : (requestType == HTTPAPI_REQUEST_CONNECT) ? "CONNECT"
         : (requestType == HTTPAPI_REQUEST_OPTIONS) ? "OPTIONS"
-        : (requestType == HTTPAPI_REQUEST_OPTIONS) ? "TRACE"
-        : NULL;
-    if (method == NULL)
+        : (requestType == HTTPAPI_REQUEST_TRACE) ? "TRACE"
+        : "GET";
+    size_t buffLen = strlen(HTTP_REQUEST_LINE_FMT)+strlen(method)+strlen(relativePath);
+    char* request = malloc(buffLen+1);
+    if (request == NULL)
     {
-        LogError("Invalid request method specified");
         result = NULL;
+        LogError("Failure allocating Request data");
+        *httpapi_result = HTTPAPI_ALLOC_FAILED;
     }
     else
     {
-        size_t buffLen = strlen(HTTP_REQUEST_LINE_FMT)+strlen(method)+strlen(relativePath);
-        char* request = malloc(buffLen+1);
-        if (request == NULL)
+        if (snprintf(request, buffLen+1, HTTP_REQUEST_LINE_FMT, method, relativePath) <= 0)
         {
             result = NULL;
-            LogError("Failure allocating Request data");
+            LogError("Failure writing request buffer");
+            *httpapi_result = HTTPAPI_STRING_PROCESSING_ERROR;
         }
         else
         {
-            if (snprintf(request, buffLen+1, HTTP_REQUEST_LINE_FMT, method, relativePath) <= 0)
+            result = STRING_construct(request);
+            if (result == NULL)
             {
+                LogError("Failure creating buffer object");
+                *httpapi_result = HTTPAPI_ALLOC_FAILED;
+            }
+            else if ( (*httpapi_result = construct_http_headers(requestType, httpHeadersHandle, contentLength, result, hostname, chunkData) ) != HTTPAPI_OK)
+            {
+                STRING_delete(result);
                 result = NULL;
-                LogError("Failure writing request buffer");
+                *httpapi_result = HTTPAPI_SEND_REQUEST_FAILED;
             }
-            else
-            {
-                result = STRING_construct(request);
-                if (result == NULL)
-                {
-                    LogError("Failure creating buffer object");
-                }
-                else if (construct_http_headers(requestType, httpHeadersHandle, contentLength, result, hostname, chunkData) != 0)
-                {
-                    STRING_delete(result);
-                    result = NULL;
-                }
-            }
-            free(request);
         }
+        free(request);
     }
     return result;
 }
 
-static int send_http_data(HTTP_HANDLE_DATA* http_data, HTTPAPI_REQUEST_TYPE requestType, const char* relativePath,
+static HTTPAPI_RESULT send_http_data(HTTP_HANDLE_DATA* http_data, HTTPAPI_REQUEST_TYPE requestType, const char* relativePath,
     HTTP_HEADERS_HANDLE httpHeadersHandle, size_t contentLength, bool sendChunked)
 {
-    int result;
-    STRING_HANDLE httpData = build_http_request(requestType, relativePath, httpHeadersHandle, contentLength, http_data->hostname, sendChunked);
-    if (httpData == NULL)
-    {
-        result = __LINE__;
-    }
-    else
+    HTTPAPI_RESULT result;
+
+    STRING_HANDLE httpData = build_http_request(requestType, relativePath, httpHeadersHandle, contentLength, http_data->hostname, sendChunked, &result);
+    if (httpData != NULL)
     {
         if (write_http_text(http_data, STRING_c_str(httpData)) != 0)
         {
-            result = __LINE__;
+            result = HTTPAPI_SEND_REQUEST_FAILED;
             LogError("Failure writing request buffer");
         }
         else
         {
-            result = 0;
+            result = HTTPAPI_OK;
         }
         STRING_delete(httpData);
     }
@@ -875,11 +868,8 @@ HTTPAPI_RESULT HTTPAPI_ExecuteRequestAsync(HTTP_HANDLE handle, HTTPAPI_REQUEST_T
     {
         http_data->recvMsg.fn_execute_complete = on_execute_complete;
         http_data->recvMsg.execute_ctx = callback_context;
-        if (send_http_data(http_data, requestType, relativePath, httpHeadersHandle, contentLength, false) != 0)
-        {
-            result = HTTPAPI_ERROR;
-        }
-        else
+        result = send_http_data(http_data, requestType, relativePath, httpHeadersHandle, contentLength, false);
+        if (result == HTTPAPI_OK)
         {
             if (content != NULL && contentLength != 0)
             {
@@ -896,10 +886,6 @@ HTTPAPI_RESULT HTTPAPI_ExecuteRequestAsync(HTTP_HANDLE handle, HTTPAPI_REQUEST_T
                 {
                     result = HTTPAPI_OK;
                 }
-            }
-            else
-            {
-                result = HTTPAPI_OK;
             }
         }
     }
@@ -918,37 +904,51 @@ void HTTPAPI_DoWork(HTTP_HANDLE handle)
 HTTPAPI_RESULT HTTPAPI_SetOption(HTTP_HANDLE handle, const char* optionName, const void* value)
 {
     HTTPAPI_RESULT result;
-    if (handle == NULL || optionName == NULL || value == NULL)
+    if (handle == NULL || optionName == NULL)
     {
         result = HTTPAPI_INVALID_ARG;
         LogError("invalid parameter (NULL) passed to HTTPAPI_SetOption");
     }
     else if (strcmp("TrustedCerts", optionName) == 0)
     {
-        HTTP_HANDLE_DATA* http_data = (HTTP_HANDLE_DATA*)handle;
-        if (http_data->certificate)
+        if (value == NULL)
         {
-            free(http_data->certificate);
-        }
-
-        int len = strlen((char*)value);
-        http_data->certificate = (char*)malloc(len + 1);
-        if (http_data->certificate == NULL)
-        {
-            result = HTTPAPI_ERROR;
-            LogError("unable to allocate certificate memory in HTTPAPI_SetOption");
+            result = HTTPAPI_INVALID_ARG;
         }
         else
         {
-            (void)strcpy(http_data->certificate, (const char*)value);
-            result = HTTPAPI_OK;
+            HTTP_HANDLE_DATA* http_data = (HTTP_HANDLE_DATA*)handle;
+            if (http_data->certificate)
+            {
+                free(http_data->certificate);
+            }
+
+            int len = strlen((char*)value);
+            http_data->certificate = (char*)malloc(len + 1);
+            if (http_data->certificate == NULL)
+            {
+                result = HTTPAPI_ALLOC_FAILED;
+                LogError("unable to allocate certificate memory in HTTPAPI_SetOption");
+            }
+            else
+            {
+                (void)strcpy(http_data->certificate, (const char*)value);
+                result = HTTPAPI_OK;
+            }
         }
     }
     else if (strcmp("logtrace", optionName) == 0)
     {
-        HTTP_HANDLE_DATA* http_data = (HTTP_HANDLE_DATA*)handle;
-        http_data->logTrace = *((bool*)value);
-        result = HTTPAPI_OK;
+        if (value == NULL)
+        {
+            result = HTTPAPI_INVALID_ARG;
+        }
+        else
+        {
+            HTTP_HANDLE_DATA* http_data = (HTTP_HANDLE_DATA*)handle;
+            http_data->logTrace = *((bool*)value);
+            result = HTTPAPI_OK;
+        }
     }
     else
     {
