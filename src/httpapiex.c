@@ -385,7 +385,7 @@ HTTPAPIEX_RESULT HTTPAPIEX_ExecuteRequest(HTTPAPIEX_HANDLE handle, HTTPAPI_REQUE
                         }
                         case 1:
                         {
-                            if ((handleData->httpHandle = HTTPAPI_CreateConnection(NULL, STRING_c_str(handleData->hostName))) == NULL)
+                            if ((handleData->httpHandle = HTTPAPI_CreateConnection(NULL, STRING_c_str(handleData->hostName), 0)) == NULL)
                             {
                                 goOn = false;
                             }

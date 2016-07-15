@@ -16,16 +16,22 @@
 #include "azure_c_shared_utility/crt_abstractions.h"
 #include "azure_c_shared_utility/xlogging.h"
 #include "azure_c_shared_utility/xio.h"
-#include "azure_c_shared_utility/platform.h"
-#include "azure_c_shared_utility/tlsio.h"
+//#include "azure_c_shared_utility/platform.h"
+//#include "azure_c_shared_utility/tlsio.h"
 #include "azure_c_shared_utility/strings.h"
 #include "azure_c_shared_utility/constbuffer.h"
 
 #define MAX_HOSTNAME_LEN        65
 #define TEMP_BUFFER_SIZE        4096
 #define TIME_MAX_BUFFER         16
+#define HTTP_SECURE_PORT        443
+#define HTTP_DEFAULT_PORT       80
 
-static const char* HTTP_REQUEST_LINE_FMT = "%s %s HTTP/1.1\r\n";
+static const char* HTTP_PREFIX = "http://";
+static const char* HTTP_PREFIX_SECURE = "https://";
+
+static const char* HTTP_REQUEST_LINE_FMT = "%s %s%s%s HTTP/1.1\r\n";
+static const char* HTTP_REQUEST_LINE_AUTHORITY_FMT = "%s %s%s:%d%s HTTP/1.1\r\n";
 static const char* HTTP_CONTENT_LEN = "Content-Length";
 static const char* HTTP_HOST_HEADER = "Host";
 static const char* HTTP_CHUNKED_ENCODING_HDR = "Transfer-Encoding: chunked\r\n";
@@ -36,6 +42,7 @@ DEFINE_ENUM_STRINGS(HTTPAPI_RESULT, HTTPAPI_RESULT_VALUES)
 
 typedef enum RESPONSE_MESSAGE_STATE_TAG
 {
+    state_complete,
     state_initial,
     state_status_line,
     state_response_header,
@@ -61,6 +68,7 @@ typedef struct HTTP_RECV_DATA_TAG
 typedef struct HTTP_HANDLE_DATA_TAG
 {
     char* hostname;
+    int http_port;
     char* certificate;
     XIO_HANDLE xio_handle;
     size_t received_bytes_count;
@@ -70,6 +78,70 @@ typedef struct HTTP_HANDLE_DATA_TAG
     unsigned int is_connected : 1;
     bool logTrace;
 } HTTP_HANDLE_DATA;
+
+static char* create_request_line(HTTPAPI_REQUEST_TYPE requestType, const char* hostname, int port, const char* relativePath)
+{
+    char* result;
+
+    // Get the Method to be used
+    const char* method = (requestType == HTTPAPI_REQUEST_HEAD) ? "HEAD"
+        : (requestType == HTTPAPI_REQUEST_POST) ? "POST"
+        : (requestType == HTTPAPI_REQUEST_PUT) ? "PUT"
+        : (requestType == HTTPAPI_REQUEST_DELETE) ? "DELETE"
+        : (requestType == HTTPAPI_REQUEST_CONNECT) ? "CONNECT"
+        : (requestType == HTTPAPI_REQUEST_OPTIONS) ? "OPTIONS"
+        : (requestType == HTTPAPI_REQUEST_TRACE) ? "TRACE"
+        : "GET";
+
+    const char* http_prefix = NULL;
+    size_t buffLen = 0;
+    if (requestType == HTTPAPI_REQUEST_CONNECT || port != HTTP_DEFAULT_PORT)
+    {
+        buffLen = strlen(HTTP_REQUEST_LINE_AUTHORITY_FMT)+strlen(method)+strlen(relativePath)+strlen(hostname)+strlen(relativePath)+4;
+    }
+    else
+    {
+        buffLen = strlen(HTTP_REQUEST_LINE_FMT)+strlen(method)+strlen(relativePath)+strlen(relativePath)+strlen(hostname)+strlen(relativePath);
+    }
+    if (port == HTTP_SECURE_PORT)
+    {
+        buffLen += strlen(HTTP_PREFIX_SECURE);
+        http_prefix = HTTP_PREFIX_SECURE;
+    }
+    else
+    {
+        buffLen += strlen(HTTP_PREFIX);
+        http_prefix = HTTP_PREFIX;
+    }
+
+    result = malloc(buffLen+1);
+    if (result == NULL)
+    {
+        LogError("Failure allocating Request data");
+    }
+    else
+    {
+        if (requestType == HTTPAPI_REQUEST_CONNECT || port != HTTP_DEFAULT_PORT)
+        {
+            if (snprintf(result, buffLen+1, HTTP_REQUEST_LINE_AUTHORITY_FMT, method, http_prefix, hostname, port, relativePath) <= 0)
+            {
+                LogError("Failure writing request buffer");
+                free(result);
+                result = NULL;
+            }
+        }
+        else
+        {
+            if (snprintf(result, buffLen+1, HTTP_REQUEST_LINE_FMT, method, http_prefix, hostname, relativePath) <= 0)
+            {
+                LogError("Failure writing request buffer");
+                free(result);
+                result = NULL;
+            }
+        }
+    }
+    return result;
+}
 
 static void getLogTime(char* timeResult, size_t len)
 {
@@ -488,6 +560,7 @@ static void on_bytes_recv(void* context, const unsigned char* buffer, size_t len
             free(http_data->recvMsg.storedBytes);
             http_data->recvMsg.storedBytes = NULL;
             http_data->recvMsg.storedLen = 0;
+            http_data->recvMsg.recvState = state_complete;
         }
     }
 }
@@ -528,7 +601,7 @@ static int write_http_data(HTTP_HANDLE_DATA* http_data, const unsigned char* wri
         {
             char timeResult[TIME_MAX_BUFFER];
             getLogTime(timeResult, TIME_MAX_BUFFER);
-            LOG(LOG_TRACE, LOG_LINE, "%s", timeResult);
+            LOG(LOG_TRACE, 0, "-> %s ", timeResult);
             for (size_t index = 0; index < length; index++)
             {
                 LOG(LOG_TRACE, 0, "0x%02x ", writeData[index]);
@@ -552,14 +625,14 @@ static int write_http_text(HTTP_HANDLE_DATA* http_data, const char* writeText)
         {
             char timeResult[TIME_MAX_BUFFER];
             getLogTime(timeResult, TIME_MAX_BUFFER);
-            LOG(LOG_TRACE, LOG_LINE, "%s", timeResult);
-            LOG(LOG_TRACE, LOG_LINE, "%s", writeText);
+            LOG(LOG_TRACE, 0, "-> %s ", timeResult);
+            LOG(LOG_TRACE, 0, "%s", writeText);
         }
     }
     return result;
 }
 
-static HTTPAPI_RESULT construct_http_headers(HTTPAPI_REQUEST_TYPE requestType, HTTP_HEADERS_HANDLE httpHeaderHandle, size_t contentLen, STRING_HANDLE buffData, const char* hostname, bool chunkData)
+static HTTPAPI_RESULT construct_http_headers(HTTPAPI_REQUEST_TYPE requestType, HTTP_HEADERS_HANDLE httpHeaderHandle, size_t contentLen, STRING_HANDLE http_preamble, const char* hostname, int port, bool chunkData)
 {
     HTTPAPI_RESULT result;
     size_t headerCnt = 0;
@@ -592,11 +665,11 @@ static HTTPAPI_RESULT construct_http_headers(HTTPAPI_REQUEST_TYPE requestType, H
                 }
                 else
                 {
-                    if (strcmp(header, HTTP_CONTENT_LEN) == 0)
+                    if (strstr(header, HTTP_CONTENT_LEN) != NULL)
                     {
                         contentLenFound = true;
                     }
-                    else if (strcmp(header, HTTP_HOST_HEADER) == 0)
+                    else if (strstr(header, HTTP_HOST_HEADER) != NULL)
                     {
                         hostNameFound = true;
                     }
@@ -608,7 +681,7 @@ static HTTPAPI_RESULT construct_http_headers(HTTPAPI_REQUEST_TYPE requestType, H
                     }
                     else
                     {
-                        if (STRING_concat(buffData, sendData) != 0)
+                        if (STRING_concat(http_preamble, sendData) != 0)
                         {
                             result = HTTPAPI_STRING_PROCESSING_ERROR;
                             LogError("Failed in building header data");
@@ -624,7 +697,7 @@ static HTTPAPI_RESULT construct_http_headers(HTTPAPI_REQUEST_TYPE requestType, H
         {
             if (chunkData)
             {
-                if (STRING_concat(buffData, HTTP_CHUNKED_ENCODING_HDR) != 0)
+                if (STRING_concat(http_preamble, HTTP_CHUNKED_ENCODING_HDR) != 0)
                 {
                     result = HTTPAPI_STRING_PROCESSING_ERROR;
                     LogError("Failed building content len header data");
@@ -643,7 +716,7 @@ static HTTPAPI_RESULT construct_http_headers(HTTPAPI_REQUEST_TYPE requestType, H
                     }
                     else
                     {
-                        if (STRING_concat(buffData, content) != 0)
+                        if (STRING_concat(http_preamble, content) != 0)
                         {
                             result = HTTPAPI_STRING_PROCESSING_ERROR;
                             LogError("Failed building content len header data");
@@ -655,26 +728,48 @@ static HTTPAPI_RESULT construct_http_headers(HTTPAPI_REQUEST_TYPE requestType, H
 
             if (!hostNameFound)
             {
-                size_t fmtLen = strlen(HTTP_HOST_HEADER)+strlen(HTTP_CRLF_VALUE)+strlen(hostname)+2;
-                char* content = malloc(fmtLen+1);
-                if (sprintf(content, "%s: %s%s", HTTP_HOST_HEADER, hostname, HTTP_CRLF_VALUE) <= 0)
+                if (requestType == HTTPAPI_REQUEST_CONNECT)
                 {
-                    result = HTTPAPI_STRING_PROCESSING_ERROR;
-                    LogError("Failed allocating content len header data");
+                    size_t fmtLen = strlen(HTTP_HOST_HEADER)+strlen(HTTP_CRLF_VALUE)+strlen(hostname)+8;
+                    char* content = malloc(fmtLen+1);
+                    if (sprintf(content, "%s: %s:%d%s", HTTP_HOST_HEADER, hostname, port, HTTP_CRLF_VALUE) <= 0)
+                    {
+                        result = HTTPAPI_STRING_PROCESSING_ERROR;
+                        LogError("Failed allocating content len header data");
+                    }
+                    else
+                    {
+                        if (STRING_concat(http_preamble, content) != 0)
+                        {
+                            result = HTTPAPI_STRING_PROCESSING_ERROR;
+                            LogError("Failed building content len header data");
+                        }
+                    }
+                    free(content);
                 }
                 else
                 {
-                    if (STRING_concat(buffData, content) != 0)
+                    size_t fmtLen = strlen(HTTP_HOST_HEADER)+strlen(HTTP_CRLF_VALUE)+strlen(hostname)+2;
+                    char* content = malloc(fmtLen+1);
+                    if (sprintf(content, "%s: %s%s", HTTP_HOST_HEADER, hostname, HTTP_CRLF_VALUE) <= 0)
                     {
                         result = HTTPAPI_STRING_PROCESSING_ERROR;
-                        LogError("Failed building content len header data");
+                        LogError("Failed allocating content len header data");
                     }
+                    else
+                    {
+                        if (STRING_concat(http_preamble, content) != 0)
+                        {
+                            result = HTTPAPI_STRING_PROCESSING_ERROR;
+                            LogError("Failed building content len header data");
+                        }
+                    }
+                    free(content);
                 }
-                free(content);
             }
 
 
-            if (STRING_concat(buffData, "\r\n") != 0)
+            if (STRING_concat(http_preamble, "\r\n") != 0)
             {
                 result = HTTPAPI_STRING_PROCESSING_ERROR;
                 LogError("Failed sending header finalization data");
@@ -684,78 +779,48 @@ static HTTPAPI_RESULT construct_http_headers(HTTPAPI_REQUEST_TYPE requestType, H
     return result;
 }
 
-static STRING_HANDLE build_http_request(HTTPAPI_REQUEST_TYPE requestType, const char* relativePath, HTTP_HEADERS_HANDLE httpHeadersHandle, size_t contentLength, const char* hostname, bool chunkData, HTTPAPI_RESULT* httpapi_result)
-{
-    STRING_HANDLE result;
-
-    // Get the Method to be used
-    const char* method = (requestType == HTTPAPI_REQUEST_HEAD) ? "HEAD"
-        : (requestType == HTTPAPI_REQUEST_POST) ? "POST"
-        : (requestType == HTTPAPI_REQUEST_PUT) ? "PUT"
-        : (requestType == HTTPAPI_REQUEST_DELETE) ? "DELETE"
-        : (requestType == HTTPAPI_REQUEST_CONNECT) ? "CONNECT"
-        : (requestType == HTTPAPI_REQUEST_OPTIONS) ? "OPTIONS"
-        : (requestType == HTTPAPI_REQUEST_TRACE) ? "TRACE"
-        : "GET";
-    size_t buffLen = strlen(HTTP_REQUEST_LINE_FMT)+strlen(method)+strlen(relativePath);
-    char* request = malloc(buffLen+1);
-    if (request == NULL)
-    {
-        result = NULL;
-        LogError("Failure allocating Request data");
-        *httpapi_result = HTTPAPI_ALLOC_FAILED;
-    }
-    else
-    {
-        if (snprintf(request, buffLen+1, HTTP_REQUEST_LINE_FMT, method, relativePath) <= 0)
-        {
-            result = NULL;
-            LogError("Failure writing request buffer");
-            *httpapi_result = HTTPAPI_STRING_PROCESSING_ERROR;
-        }
-        else
-        {
-            result = STRING_construct(request);
-            if (result == NULL)
-            {
-                LogError("Failure creating buffer object");
-                *httpapi_result = HTTPAPI_ALLOC_FAILED;
-            }
-            else if ( (*httpapi_result = construct_http_headers(requestType, httpHeadersHandle, contentLength, result, hostname, chunkData) ) != HTTPAPI_OK)
-            {
-                STRING_delete(result);
-                result = NULL;
-                *httpapi_result = HTTPAPI_SEND_REQUEST_FAILED;
-            }
-        }
-        free(request);
-    }
-    return result;
-}
-
 static HTTPAPI_RESULT send_http_data(HTTP_HANDLE_DATA* http_data, HTTPAPI_REQUEST_TYPE requestType, const char* relativePath,
     HTTP_HEADERS_HANDLE httpHeadersHandle, size_t contentLength, bool sendChunked)
 {
     HTTPAPI_RESULT result;
+    STRING_HANDLE http_preamble;
 
-    STRING_HANDLE httpData = build_http_request(requestType, relativePath, httpHeadersHandle, contentLength, http_data->hostname, sendChunked, &result);
-    if (httpData != NULL)
+    char* request_line = create_request_line(requestType, http_data->hostname, http_data->http_port, relativePath);
+    if (request_line == NULL)
     {
-        if (write_http_text(http_data, STRING_c_str(httpData)) != 0)
+        result = HTTPAPI_STRING_PROCESSING_ERROR;
+    }
+    else
+    {
+        http_preamble = STRING_construct(request_line);
+        if (http_preamble == NULL)
         {
-            result = HTTPAPI_SEND_REQUEST_FAILED;
-            LogError("Failure writing request buffer");
+            LogError("Failure creating buffer object");
+            result = HTTPAPI_ALLOC_FAILED;
         }
         else
         {
-            result = HTTPAPI_OK;
+            result = construct_http_headers(requestType, httpHeadersHandle, contentLength, http_preamble, http_data->hostname, http_data->http_port, sendChunked);
+            if (result == HTTPAPI_OK)
+            {
+                if (write_http_text(http_data, STRING_c_str(http_preamble)) != 0)
+                {
+                    result = HTTPAPI_SEND_REQUEST_FAILED;
+                    LogError("Failure writing request buffer");
+                }
+                else
+                {
+                    result = HTTPAPI_OK;
+                }
+            }
+            STRING_delete(http_preamble);
         }
-        STRING_delete(httpData);
+        free(request_line);
     }
     return result;
 }
 
-HTTP_HANDLE HTTPAPI_CreateConnection(XIO_HANDLE xio, const char* hostName)
+HTTP_HANDLE HTTPAPI_CreateConnection(XIO_HANDLE xio, const char* hostName, int port)
 {
     HTTP_HANDLE_DATA* http_data = NULL;
     if (hostName == NULL || xio == NULL)
@@ -792,13 +857,14 @@ HTTP_HANDLE HTTPAPI_CreateConnection(XIO_HANDLE xio, const char* hostName)
             }
             else
             {
+                http_data->http_port = port;
                 http_data->is_connected = 0;
                 http_data->is_io_error = 0;
                 http_data->received_bytes_count = 0;
                 http_data->received_bytes = NULL;
                 http_data->certificate = NULL;
                 memset(&http_data->recvMsg, 0, sizeof(HTTP_RECV_DATA) );
-                http_data->recvMsg.recvState = state_initial;
+                http_data->recvMsg.recvState = state_complete;
                 http_data->recvMsg.chunkedReply = false;
             }
         }
@@ -860,12 +926,14 @@ HTTPAPI_RESULT HTTPAPI_ExecuteRequestAsync(HTTP_HANDLE handle, HTTPAPI_REQUEST_T
     {
         result = HTTPAPI_INVALID_ARG;
     }
-    else if (http_data->recvMsg.recvState != state_initial)
+    else if (http_data->recvMsg.recvState != state_complete && 
+        http_data->recvMsg.recvState != state_error)
     {
         result = HTTPAPI_IN_PROGRESS;
     }
     else
     {
+        http_data->recvMsg.recvState = state_initial;
         http_data->recvMsg.fn_execute_complete = on_execute_complete;
         http_data->recvMsg.execute_ctx = callback_context;
         result = send_http_data(http_data, requestType, relativePath, httpHeadersHandle, contentLength, false);
@@ -880,13 +948,18 @@ HTTPAPI_RESULT HTTPAPI_ExecuteRequestAsync(HTTP_HANDLE handle, HTTPAPI_REQUEST_T
                     http_data->recvMsg.respHeader = NULL;
                     BUFFER_delete(http_data->recvMsg.msgBody);
                     http_data->recvMsg.msgBody = NULL;
-                    result = HTTPAPI_ERROR;
+                    result = HTTPAPI_SEND_REQUEST_FAILED;
+                    http_data->recvMsg.recvState = state_error;
                 }
                 else
                 {
                     result = HTTPAPI_OK;
                 }
             }
+        }
+        else
+        {
+            http_data->recvMsg.recvState = state_error;
         }
     }
     return result;
@@ -992,6 +1065,7 @@ HTTPAPI_RESULT HTTPAPI_CloneOption(const char* optionName, const void* value, co
         }
         else
         {
+            *tempLogTrace = value;
             *savedValue = tempLogTrace;
             result = HTTPAPI_OK;
         }

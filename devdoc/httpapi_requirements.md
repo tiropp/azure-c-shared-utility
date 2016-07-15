@@ -101,6 +101,9 @@ HTTPAPI_RESULT HTTPAPI_ExecuteRequestAsync(HTTP_HANDLE handle, HTTPAPI_REQUEST_T
 **SRS_HTTPAPI_07_012: [**HTTPAPI_ExecuteRequestAsync shall add the Content-Length http header to the request if not supplied and the length of the content is > 0 or the requestType is a POST (rfc7230 3.3.2).**]**  
 **SRS_HTTPAPI_07_013: [**If HTTPAPI_ExecuteRequestAsync is called before a previous call is complete, HTTPAPI_ExecuteRequestAsync shall return HTTPAPI_IN_PROGRESS.**]**  
 **SRS_HTTPAPI_07_014: [**HTTPAPI_ExecuteRequestAsync shall add the HOST http header to the request if not supplied (rfc7230 5.4).**]**  
+**SRS_HTTPAPI_07_023: [**If the HTTPAPI_REQUEST_CONNECT type is specified HTTPAPI_ExecuteRequestAsync shall send the authority form of the request target ie 'Host: server.com:80' (rfc7231 4.3.6).**]**  
+**SRS_HTTPAPI_07_024: [**HTTPAPI_ExecuteRequestAsync shall use absolute-form when generating the request Target (rfc7230 5.3.2).**]**
+**SRS_HTTPAPI_07_025: [**HTTPAPI_ExecuteRequestAsync shall use authority form of the request target if the port value is not the default http port (port 80) (rfc7230 5.3.3).**]**
 
 ### HTTPAPI_DoWork
 
