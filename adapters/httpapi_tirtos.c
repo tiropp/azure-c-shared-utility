@@ -47,18 +47,10 @@ static int splitHeader(char *headerName, char **headerValue)
     return (0);
 }
 
-HTTPAPI_RESULT HTTPAPI_Init(void)
-{
-    return (HTTPAPI_OK);
-}
-
-void HTTPAPI_Deinit(void)
-{
-}
-
-HTTP_HANDLE HTTPAPI_CreateConnection(XIO_HANDLE xio, const char* hostName)
+HTTP_HANDLE HTTPAPI_CreateConnection(XIO_HANDLE xio, const char* hostName, int port)
 {
     (void)xio;
+    (void)port;
     int ret;
     struct sockaddr addr;
     HTTPCli_Handle cli;

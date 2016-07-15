@@ -62,7 +62,7 @@ static HTTPAPI_RESULT ConstructHeadersString(HTTP_HEADERS_HANDLE httpHeadersHand
 }
 static size_t nUsersOfHTTPAPI = 0; /*used for reference counting (a weak one)*/
 
-HTTPAPI_RESULT HTTPAPI_Init(void)
+HTTPAPI_RESULT initialize_wininet(void)
 {
     HTTPAPI_RESULT result;
 
@@ -85,7 +85,7 @@ HTTPAPI_RESULT HTTPAPI_Init(void)
     return result;
 }
 
-void HTTPAPI_Deinit(void)
+void deinitialize_wininet(void)
 {
     if (nUsersOfHTTPAPI > 0)
     {
@@ -100,7 +100,7 @@ void HTTPAPI_Deinit(void)
     }
 }
 
-HTTP_HANDLE HTTPAPI_CreateConnection(const char* hostName)
+HTTP_HANDLE HTTPAPI_CreateConnection(const char* hostName, const char* hostName, int port)
 {
     HTTP_HANDLE_DATA* result = (HTTP_HANDLE_DATA*)malloc(sizeof(HTTP_HANDLE_DATA));
     if (result == NULL)

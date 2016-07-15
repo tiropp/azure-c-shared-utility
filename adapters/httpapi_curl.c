@@ -45,15 +45,19 @@ typedef struct HTTP_RESPONSE_CONTENT_BUFFER_TAG
 
 static size_t nUsersOfHTTPAPI = 0; /*used for reference counting (a weak one)*/
 
-HTTPAPI_RESULT HTTPAPI_Init(void)
+HTTP_HANDLE HTTPAPI_CreateConnection(XIO_HANDLE xio, const char* hostName, int port)
 {
+    (void)xio;
+    (void)port;
+    HTTP_HANDLE_DATA* httpHandleData;
+
     HTTPAPI_RESULT result;
     if (nUsersOfHTTPAPI == 0)
     {
         if (curl_global_init(CURL_GLOBAL_NOTHING) != 0)
         {
-            result = HTTPAPI_INIT_FAILED;
             LogError("(result = %s)", ENUM_TO_STRING(HTTPAPI_RESULT, result));
+            httpHandleData = NULL;
         }
         else
         {
@@ -65,29 +69,10 @@ HTTPAPI_RESULT HTTPAPI_Init(void)
     {
         nUsersOfHTTPAPI++;
         result = HTTPAPI_OK;
+        httpHandleData = NULL;
     }
 
-    return result;
-}
-
-void HTTPAPI_Deinit(void)
-{
-    if (nUsersOfHTTPAPI > 0)
-    {
-        nUsersOfHTTPAPI--;
-        if (nUsersOfHTTPAPI == 0)
-        {
-            curl_global_cleanup();
-        }
-    }
-}
-
-HTTP_HANDLE HTTPAPI_CreateConnection(XIO_HANDLE xio, const char* hostName)
-{
-    (void)xio;
-    HTTP_HANDLE_DATA* httpHandleData;
-
-    if (hostName == NULL)
+    if (hostName == NULL && result == HTTPAPI_OK)
     {
         LogError("invalid arg const char* hostName = %p", hostName);
         httpHandleData = NULL;
@@ -152,6 +137,14 @@ void HTTPAPI_CloseConnection(HTTP_HANDLE handle)
         free(httpHandleData->hostURL);
         curl_easy_cleanup(httpHandleData->curl);
         free(httpHandleData);
+    }
+    if (nUsersOfHTTPAPI > 0)
+    {
+        nUsersOfHTTPAPI--;
+        if (nUsersOfHTTPAPI == 0)
+        {
+            curl_global_cleanup();
+        }
     }
 }
 

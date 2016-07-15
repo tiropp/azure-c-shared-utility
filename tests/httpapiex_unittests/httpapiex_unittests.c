@@ -90,9 +90,6 @@ static size_t whenShallBUFFER_size_fail;
 static size_t currentHTTPAPI_CreateConnection_call;
 static size_t whenShallHTTPAPI_CreateConnection_fail[N_MAX_FAILS];
 
-static size_t currentHTTPAPI_Init_call;
-static size_t whenShallHTTPAPI_Init_fail[N_MAX_FAILS];
-static size_t HTTPAPI_Init_calls;
 
 STRING_HANDLE my_STRING_construct(const char* psz)
 {
@@ -123,39 +120,6 @@ BUFFER_HANDLE my_BUFFER_new(void)
 void my_BUFFER_delete(BUFFER_HANDLE handle)
 {
     free(handle);
-}
-
-HTTPAPI_RESULT my_HTTPAPI_Init(void)
-{
-    HTTPAPI_RESULT result2;
-    currentHTTPAPI_Init_call++;
-    size_t i;
-    for (i = 0; i < N_MAX_FAILS; i++)
-    {
-        if (whenShallHTTPAPI_Init_fail[i] > 0)
-        {
-            if (currentHTTPAPI_Init_call == whenShallHTTPAPI_Init_fail[i])
-            {
-                break;
-            }
-        }
-    }
-
-    if (i == N_MAX_FAILS)
-    {
-        HTTPAPI_Init_calls++;
-        result2 = HTTPAPI_OK;
-    }
-    else
-    {
-        result2 = HTTPAPI_ERROR;
-    }
-    return result2;
-}
-
-void my_HTTPAPI_Deinit(void)
-{
-    HTTPAPI_Init_calls--;
 }
 
 HTTP_HANDLE my_HTTPAPI_CreateConnection(XIO_HANDLE xio, const char* hostName, int port)
@@ -336,12 +300,10 @@ static void setupAllCallBeforeHTTPsequence(void)
 
 static void setupAllCallForHTTPsequence(const char* relativePath, HTTP_HEADERS_HANDLE requestHttpHeaders, BUFFER_HANDLE requestHttpBody, HTTP_HEADERS_HANDLE responseHttpHeaders, BUFFER_HANDLE responseHttpBody)
 {
-    STRICT_EXPECTED_CALL(HTTPAPI_Init());
-
     /*this is getting the hostname for the HTTAPI_connect call)*/
     STRICT_EXPECTED_CALL(STRING_c_str(IGNORED_PTR_ARG))
         .IgnoreArgument(1);
-    STRICT_EXPECTED_CALL(HTTPAPI_CreateConnection(NULL, TEST_HOSTNAME, TEST_PORT_NUM));
+    EXPECTED_CALL(HTTPAPI_CreateConnection(IGNORED_PTR_ARG, TEST_HOSTNAME, TEST_PORT_NUM));
     STRICT_EXPECTED_CALL(VECTOR_size(IGNORED_PTR_ARG)) /*this is passing the options*/ /*there are none saved in the regular sequences*/
         .IgnoreArgument(1);
 
@@ -459,8 +421,6 @@ TEST_SUITE_INITIALIZE(TestClassInitialize)
     REGISTER_GLOBAL_MOCK_HOOK(BUFFER_delete, my_BUFFER_delete);
     REGISTER_GLOBAL_MOCK_RETURN(BUFFER_u_char, TEST_BUFFER);
     REGISTER_GLOBAL_MOCK_RETURN(BUFFER_length, TEST_BUFFER_SIZE);
-    REGISTER_GLOBAL_MOCK_HOOK(HTTPAPI_Init, my_HTTPAPI_Init);
-    REGISTER_GLOBAL_MOCK_HOOK(HTTPAPI_Deinit, my_HTTPAPI_Deinit);
     REGISTER_GLOBAL_MOCK_HOOK(HTTPAPI_CreateConnection, my_HTTPAPI_CreateConnection);
     REGISTER_GLOBAL_MOCK_HOOK(HTTPAPI_CloseConnection, my_HTTPAPI_CloseConnection);
     REGISTER_GLOBAL_MOCK_RETURN(HTTPAPI_ExecuteRequest, HTTPAPI_OK);
@@ -510,13 +470,9 @@ TEST_FUNCTION_INITIALIZE(TestMethodInitialize)
     currentBUFFER_size_call = 0;
     whenShallBUFFER_size_fail = 0;
     
-    HTTPAPI_Init_calls = 0;
 
     currentHTTPAPI_CreateConnection_call = 0;
     for(size_t i=0;i<N_MAX_FAILS;i++) whenShallHTTPAPI_CreateConnection_fail[i] = 0;
-
-    currentHTTPAPI_Init_call = 0;
-    for (size_t i = 0; i<N_MAX_FAILS; i++) whenShallHTTPAPI_Init_fail[i] = 0;
 
     umock_c_reset_all_calls();
 }
@@ -641,7 +597,6 @@ TEST_FUNCTION(HTTPAPIEX_Destroy_frees_resources_3) /*this is destroy after havin
 
     STRICT_EXPECTED_CALL(HTTPAPI_CloseConnection(IGNORED_PTR_ARG)) /*closing the conenction*/
         .IgnoreArgument(1);
-    STRICT_EXPECTED_CALL(HTTPAPI_Deinit()); /*deinit */
         
     STRICT_EXPECTED_CALL(STRING_delete(IGNORED_PTR_ARG)) /*this is hostname*/
         .IgnoreArgument(1);
@@ -860,10 +815,9 @@ TEST_FUNCTION(HTTPAPIEX_ExecuteRequest_with_NULL_request_headers_and_NULL_reques
         .IgnoreArgument(1);
 
     /*this is getting the buffer content and buffer length to pass to httpapi_executerequest*/
-    STRICT_EXPECTED_CALL(HTTPAPI_Init());
     STRICT_EXPECTED_CALL(STRING_c_str(IGNORED_PTR_ARG))
         .IgnoreArgument(1);
-    STRICT_EXPECTED_CALL(HTTPAPI_CreateConnection(NULL, TEST_HOSTNAME, TEST_PORT_NUM));
+    EXPECTED_CALL(HTTPAPI_CreateConnection(IGNORED_PTR_ARG, TEST_HOSTNAME, TEST_PORT_NUM));
     STRICT_EXPECTED_CALL(VECTOR_size(IGNORED_PTR_ARG)) /*this is passing the options*/ /*there are none saved in the regular sequences*/
         .IgnoreArgument(1);
 
@@ -1059,10 +1013,9 @@ TEST_FUNCTION(HTTPAPIEX_ExecuteRequest_with_non_NULL_request_headers_and_NULL_re
         .IgnoreArgument(1);
 
     /*this is getting the buffer content and buffer length to pass to httpapi_executerequest*/
-    STRICT_EXPECTED_CALL(HTTPAPI_Init());
     STRICT_EXPECTED_CALL(STRING_c_str(IGNORED_PTR_ARG))
         .IgnoreArgument(1);
-    STRICT_EXPECTED_CALL(HTTPAPI_CreateConnection(NULL, TEST_HOSTNAME, TEST_PORT_NUM));
+    EXPECTED_CALL(HTTPAPI_CreateConnection(IGNORED_PTR_ARG, TEST_HOSTNAME, TEST_PORT_NUM));
     STRICT_EXPECTED_CALL(VECTOR_size(IGNORED_PTR_ARG)) /*this is passing the options*/ /*there are none saved in the regular sequences*/
         .IgnoreArgument(1);
 
@@ -1241,10 +1194,9 @@ TEST_FUNCTION(HTTPAPIEX_ExecuteRequest_with_non_NULL_request_headers_and_non_NUL
         .IgnoreArgument(1);
 
     /*this is getting the buffer content and buffer length to pass to httpapi_executerequest*/
-    STRICT_EXPECTED_CALL(HTTPAPI_Init());
     STRICT_EXPECTED_CALL(STRING_c_str(IGNORED_PTR_ARG))
         .IgnoreArgument(1);
-    STRICT_EXPECTED_CALL(HTTPAPI_CreateConnection(NULL, TEST_HOSTNAME, TEST_PORT_NUM));
+    EXPECTED_CALL(HTTPAPI_CreateConnection(IGNORED_PTR_ARG, TEST_HOSTNAME, TEST_PORT_NUM));
     STRICT_EXPECTED_CALL(VECTOR_size(IGNORED_PTR_ARG)) /*this is passing the options*/ /*there are none saved in the regular sequences*/
         .IgnoreArgument(1);
 
@@ -1384,10 +1336,9 @@ TEST_FUNCTION(HTTPAPIEX_ExecuteRequest_with_NULL_statusCode_succeeds)
         .IgnoreArgument(1);
 
     /*this is getting the buffer content and buffer length to pass to httpapi_executerequest*/
-    STRICT_EXPECTED_CALL(HTTPAPI_Init());
     STRICT_EXPECTED_CALL(STRING_c_str(IGNORED_PTR_ARG))
         .IgnoreArgument(1);
-    STRICT_EXPECTED_CALL(HTTPAPI_CreateConnection(NULL, TEST_HOSTNAME, TEST_PORT_NUM));
+    EXPECTED_CALL(HTTPAPI_CreateConnection(IGNORED_PTR_ARG, TEST_HOSTNAME, TEST_PORT_NUM));
     STRICT_EXPECTED_CALL(VECTOR_size(IGNORED_PTR_ARG)) /*this is passing the options*/ /*there are none saved in the regular sequences*/
         .IgnoreArgument(1);
 
@@ -1453,10 +1404,9 @@ TEST_FUNCTION(HTTPAPIEX_ExecuteRequest_with_non_NULL_statusCode_returns_that_cod
         .IgnoreArgument(1);
 
     /*this is getting the buffer content and buffer length to pass to httpapi_executerequest*/
-    STRICT_EXPECTED_CALL(HTTPAPI_Init());
     STRICT_EXPECTED_CALL(STRING_c_str(IGNORED_PTR_ARG))
         .IgnoreArgument(1);
-    STRICT_EXPECTED_CALL(HTTPAPI_CreateConnection(NULL, TEST_HOSTNAME, TEST_PORT_NUM));
+    EXPECTED_CALL(HTTPAPI_CreateConnection(IGNORED_PTR_ARG, TEST_HOSTNAME, TEST_PORT_NUM));
     STRICT_EXPECTED_CALL(VECTOR_size(IGNORED_PTR_ARG)) /*this is passing the options*/ /*there are none saved in the regular sequences*/
         .IgnoreArgument(1);
 
@@ -1628,10 +1578,9 @@ TEST_FUNCTION(HTTPAPIEX_ExecuteRequest_with_NULL_response_headers_suceeds)
     STRICT_EXPECTED_CALL(HTTPHeaders_Alloc());
 
     /*this is getting the buffer content and buffer length to pass to httpapi_executerequest*/
-    STRICT_EXPECTED_CALL(HTTPAPI_Init());
     STRICT_EXPECTED_CALL(STRING_c_str(IGNORED_PTR_ARG))
         .IgnoreArgument(1);
-    STRICT_EXPECTED_CALL(HTTPAPI_CreateConnection(NULL, TEST_HOSTNAME, TEST_PORT_NUM));
+    EXPECTED_CALL(HTTPAPI_CreateConnection(IGNORED_PTR_ARG, TEST_HOSTNAME, TEST_PORT_NUM));
     STRICT_EXPECTED_CALL(VECTOR_size(IGNORED_PTR_ARG)) /*this is passing the options*/ /*there are none saved in the regular sequences*/
         .IgnoreArgument(1);
 
@@ -1745,10 +1694,9 @@ TEST_FUNCTION(HTTPAPIEX_ExecuteRequest_with_non_NULL_response_headers_suceeds)
         .IgnoreArgument(1);
 
     /*this is getting the buffer content and buffer length to pass to httpapi_executerequest*/
-    STRICT_EXPECTED_CALL(HTTPAPI_Init());
     STRICT_EXPECTED_CALL(STRING_c_str(IGNORED_PTR_ARG))
         .IgnoreArgument(1);
-    STRICT_EXPECTED_CALL(HTTPAPI_CreateConnection(NULL, TEST_HOSTNAME, TEST_PORT_NUM));
+    EXPECTED_CALL(HTTPAPI_CreateConnection(IGNORED_PTR_ARG, TEST_HOSTNAME, TEST_PORT_NUM));
     STRICT_EXPECTED_CALL(VECTOR_size(IGNORED_PTR_ARG)) /*this is passing the options*/ /*there are none saved in the regular sequences*/
         .IgnoreArgument(1);
 
@@ -1816,10 +1764,9 @@ TEST_FUNCTION(HTTPAPIEX_ExecuteRequest_with_NULL_response_body_suceeds)
     STRICT_EXPECTED_CALL(BUFFER_new()); /*because it makes a fake response buffer*/
 
     /*this is getting the buffer content and buffer length to pass to httpapi_executerequest*/
-    STRICT_EXPECTED_CALL(HTTPAPI_Init());
     STRICT_EXPECTED_CALL(STRING_c_str(IGNORED_PTR_ARG))
         .IgnoreArgument(1);
-    STRICT_EXPECTED_CALL(HTTPAPI_CreateConnection(NULL, TEST_HOSTNAME, TEST_PORT_NUM));
+    EXPECTED_CALL(HTTPAPI_CreateConnection(IGNORED_PTR_ARG, TEST_HOSTNAME, TEST_PORT_NUM));
     STRICT_EXPECTED_CALL(VECTOR_size(IGNORED_PTR_ARG)) /*this is passing the options*/ /*there are none saved in the regular sequences*/
         .IgnoreArgument(1);
 
@@ -1931,10 +1878,9 @@ TEST_FUNCTION(HTTPAPIEX_ExecuteRequest_with_non_NULL_response_body_suceeds)
         .IgnoreArgument(1);
 
     /*this is getting the buffer content and buffer length to pass to httpapi_executerequest*/
-    STRICT_EXPECTED_CALL(HTTPAPI_Init());
     STRICT_EXPECTED_CALL(STRING_c_str(IGNORED_PTR_ARG))
         .IgnoreArgument(1);
-    STRICT_EXPECTED_CALL(HTTPAPI_CreateConnection(NULL, TEST_HOSTNAME, TEST_PORT_NUM));
+    EXPECTED_CALL(HTTPAPI_CreateConnection(IGNORED_PTR_ARG, TEST_HOSTNAME, TEST_PORT_NUM));
     STRICT_EXPECTED_CALL(VECTOR_size(IGNORED_PTR_ARG)) /*this is passing the options*/ /*there are none saved in the regular sequences*/
         .IgnoreArgument(1);
 
@@ -2033,7 +1979,7 @@ TEST_FUNCTION(HTTPAPIEX_ExecuteRequest_TestCase_S2) /*refer to httpapiex_retry_m
 
         STRICT_EXPECTED_CALL(STRING_c_str(IGNORED_PTR_ARG))
         .IgnoreArgument(1);
-        STRICT_EXPECTED_CALL(HTTPAPI_CreateConnection(NULL, TEST_HOSTNAME, TEST_PORT_NUM));
+        EXPECTED_CALL(HTTPAPI_CreateConnection(IGNORED_PTR_ARG, TEST_HOSTNAME, TEST_PORT_NUM));
         STRICT_EXPECTED_CALL(VECTOR_size(IGNORED_PTR_ARG)) /*this is passing the options*/ /*there are none saved in the regular sequences*/
             .IgnoreArgument(1);
 
@@ -2098,7 +2044,7 @@ TEST_FUNCTION(HTTPAPIEX_ExecuteRequest_TestCase_S3) /*refer to httpapiex_retry_m
 
         STRICT_EXPECTED_CALL(STRING_c_str(IGNORED_PTR_ARG))
             .IgnoreArgument(1);
-        STRICT_EXPECTED_CALL(HTTPAPI_CreateConnection(NULL, TEST_HOSTNAME, TEST_PORT_NUM));
+        EXPECTED_CALL(HTTPAPI_CreateConnection(IGNORED_PTR_ARG, TEST_HOSTNAME, TEST_PORT_NUM));
         STRICT_EXPECTED_CALL(VECTOR_size(IGNORED_PTR_ARG)) /*this is passing the options*/ /*there are none saved in the regular sequences*/
             .IgnoreArgument(1);
     }
@@ -2131,15 +2077,12 @@ TEST_FUNCTION(HTTPAPIEX_ExecuteRequest_TestCase_S3) /*refer to httpapiex_retry_m
     {
         STRICT_EXPECTED_CALL(HTTPAPI_CloseConnection(IGNORED_PTR_ARG))
             .IgnoreArgument(1);
-        STRICT_EXPECTED_CALL(HTTPAPI_Deinit());
-        STRICT_EXPECTED_CALL(HTTPAPI_Init())
-            .SetReturn(HTTPAPI_OK);
     }
 
     {
         STRICT_EXPECTED_CALL(STRING_c_str(IGNORED_PTR_ARG))
             .IgnoreArgument(1);
-        STRICT_EXPECTED_CALL(HTTPAPI_CreateConnection(NULL, TEST_HOSTNAME, TEST_PORT_NUM));
+        EXPECTED_CALL(HTTPAPI_CreateConnection(IGNORED_PTR_ARG, TEST_HOSTNAME, TEST_PORT_NUM));
         STRICT_EXPECTED_CALL(VECTOR_size(IGNORED_PTR_ARG)) /*this is passing the options*/ /*there are none saved in the regular sequences*/
             .IgnoreArgument(1);
     }
@@ -2205,19 +2148,13 @@ TEST_FUNCTION(HTTPAPIEX_ExecuteRequest_TestCase_S4) /*refer to httpapiex_retry_m
         STRICT_EXPECTED_CALL(STRING_c_str(IGNORED_PTR_ARG))
             .IgnoreArgument(1);
         whenShallHTTPAPI_CreateConnection_fail[0] = currentHTTPAPI_CreateConnection_call + 1;
-        STRICT_EXPECTED_CALL(HTTPAPI_CreateConnection(NULL, TEST_HOSTNAME, TEST_PORT_NUM));
-    }
-
-    {
-        STRICT_EXPECTED_CALL(HTTPAPI_Deinit());
-        STRICT_EXPECTED_CALL(HTTPAPI_Init())
-            .SetReturn(HTTPAPI_OK);
+        EXPECTED_CALL(HTTPAPI_CreateConnection(IGNORED_PTR_ARG, TEST_HOSTNAME, TEST_PORT_NUM));
     }
 
     {
         STRICT_EXPECTED_CALL(STRING_c_str(IGNORED_PTR_ARG))
             .IgnoreArgument(1);
-        STRICT_EXPECTED_CALL(HTTPAPI_CreateConnection(NULL, TEST_HOSTNAME, TEST_PORT_NUM));
+        EXPECTED_CALL(HTTPAPI_CreateConnection(IGNORED_PTR_ARG, TEST_HOSTNAME, TEST_PORT_NUM));
         STRICT_EXPECTED_CALL(VECTOR_size(IGNORED_PTR_ARG)) /*this is passing the options*/ /*there are none saved in the regular sequences*/
             .IgnoreArgument(1);
     }
@@ -2261,52 +2198,6 @@ TEST_FUNCTION(HTTPAPIEX_ExecuteRequest_TestCase_S4) /*refer to httpapiex_retry_m
 
 /*this and all subsequent tests... */
 /*Tests_SRS_HTTPAPIEX_02_029: [Otherwise, HTTAPIEX_ExecuteRequest shall return HTTPAPIEX_RECOVERYFAILED.] */
-TEST_FUNCTION(HTTPAPIEX_ExecuteRequest_TestCase_F1) /*refer to httpapiex_retry_mechanism.vsdx*/
-{
-    /// arrange
-    HTTPAPIEX_HANDLE httpapiexhandle = HTTPAPIEX_Create(TEST_HOSTNAME);
-
-    unsigned int httpStatusCode;
-    unsigned int asGivenByHttpApi = 23;
-    HTTP_HEADERS_HANDLE requestHttpHeaders;
-    BUFFER_HANDLE requestHttpBody = TEST_BUFFER_REQ_BODY;
-    HTTP_HEADERS_HANDLE responseHttpHeaders;
-    BUFFER_HANDLE responseHttpBody = TEST_BUFFER_RESP_BODY;
-    createHttpObjects(&requestHttpHeaders, &responseHttpHeaders);
-    (void)HTTPAPIEX_ExecuteRequest(httpapiexhandle, HTTPAPI_REQUEST_CONNECT, TEST_RELATIVE_PATH, requestHttpHeaders, requestHttpBody, &httpStatusCode, responseHttpHeaders, responseHttpBody);
-    umock_c_reset_all_calls();
-
-    prepareHTTPAPIEX_ExecuteRequest(&asGivenByHttpApi, requestHttpHeaders, responseHttpHeaders, responseHttpBody, HTTPAPI_ERROR);
-
-    {
-        STRICT_EXPECTED_CALL(HTTPAPI_CloseConnection(IGNORED_PTR_ARG))
-            .IgnoreArgument(1);
-
-        STRICT_EXPECTED_CALL(STRING_c_str(IGNORED_PTR_ARG))
-            .IgnoreArgument(1);
-        whenShallHTTPAPI_CreateConnection_fail[0] = currentHTTPAPI_CreateConnection_call + 1;
-        STRICT_EXPECTED_CALL(HTTPAPI_CreateConnection(NULL, TEST_HOSTNAME, TEST_PORT_NUM));
-    }
-
-    {
-        STRICT_EXPECTED_CALL(HTTPAPI_Deinit());
-        whenShallHTTPAPI_Init_fail[0] = currentHTTPAPI_Init_call + 1;
-        STRICT_EXPECTED_CALL(HTTPAPI_Init());
-    }
-
-    /// act
-    HTTPAPIEX_RESULT result = HTTPAPIEX_ExecuteRequest(httpapiexhandle, HTTPAPI_REQUEST_CONNECT, TEST_RELATIVE_PATH, requestHttpHeaders, requestHttpBody, &httpStatusCode, responseHttpHeaders, responseHttpBody);
-
-    ///assert
-    ASSERT_ARE_EQUAL(HTTPAPIEX_RESULT, HTTPAPIEX_RECOVERYFAILED, result);
-    ASSERT_ARE_EQUAL(char_ptr, umock_c_get_expected_calls(), umock_c_get_actual_calls());
-
-    ///destroy
-    destroyHttpObjects(&requestHttpHeaders, &responseHttpHeaders);
-    HTTPAPIEX_Destroy(httpapiexhandle);
-}
-
-/*Tests_SRS_HTTPAPIEX_02_029: [Otherwise, HTTAPIEX_ExecuteRequest shall return HTTPAPIEX_RECOVERYFAILED.] */
 TEST_FUNCTION(HTTPAPIEX_ExecuteRequest_TestCase_F2) /*refer to httpapiex_retry_mechanism.vsdx*/
 {
     /// arrange
@@ -2331,25 +2222,15 @@ TEST_FUNCTION(HTTPAPIEX_ExecuteRequest_TestCase_F2) /*refer to httpapiex_retry_m
         STRICT_EXPECTED_CALL(STRING_c_str(IGNORED_PTR_ARG))
             .IgnoreArgument(1);
         whenShallHTTPAPI_CreateConnection_fail[0] = currentHTTPAPI_CreateConnection_call + 1;
-        STRICT_EXPECTED_CALL(HTTPAPI_CreateConnection(NULL, TEST_HOSTNAME, TEST_PORT_NUM));
-    }
-
-    {
-        STRICT_EXPECTED_CALL(HTTPAPI_Deinit());
-        STRICT_EXPECTED_CALL(HTTPAPI_Init());
+        EXPECTED_CALL(HTTPAPI_CreateConnection(IGNORED_PTR_ARG, TEST_HOSTNAME, TEST_PORT_NUM));
     }
 
     {
         STRICT_EXPECTED_CALL(STRING_c_str(IGNORED_PTR_ARG))
             .IgnoreArgument(1);
         whenShallHTTPAPI_CreateConnection_fail[1] = currentHTTPAPI_CreateConnection_call + 2;
-        STRICT_EXPECTED_CALL(HTTPAPI_CreateConnection(NULL, TEST_HOSTNAME, TEST_PORT_NUM));
+        EXPECTED_CALL(HTTPAPI_CreateConnection(IGNORED_PTR_ARG, TEST_HOSTNAME, TEST_PORT_NUM));
 
-    }
-
-    /*this is post final fail - sequence is reset to a clean start*/
-    {        
-        STRICT_EXPECTED_CALL(HTTPAPI_Deinit());
     }
 
     /// act
@@ -2389,18 +2270,13 @@ TEST_FUNCTION(HTTPAPIEX_ExecuteRequest_TestCase_F3) /*refer to httpapiex_retry_m
         STRICT_EXPECTED_CALL(STRING_c_str(IGNORED_PTR_ARG))
             .IgnoreArgument(1);
         whenShallHTTPAPI_CreateConnection_fail[0] = currentHTTPAPI_CreateConnection_call + 1;
-        STRICT_EXPECTED_CALL(HTTPAPI_CreateConnection(NULL, TEST_HOSTNAME, TEST_PORT_NUM));
-    }
-
-    {
-        STRICT_EXPECTED_CALL(HTTPAPI_Deinit());
-        STRICT_EXPECTED_CALL(HTTPAPI_Init());
+        EXPECTED_CALL(HTTPAPI_CreateConnection(IGNORED_PTR_ARG, TEST_HOSTNAME, TEST_PORT_NUM));
     }
 
     {
         STRICT_EXPECTED_CALL(STRING_c_str(IGNORED_PTR_ARG))
             .IgnoreArgument(1);
-        STRICT_EXPECTED_CALL(HTTPAPI_CreateConnection(NULL, TEST_HOSTNAME, TEST_PORT_NUM));
+        EXPECTED_CALL(HTTPAPI_CreateConnection(IGNORED_PTR_ARG, TEST_HOSTNAME, TEST_PORT_NUM));
         STRICT_EXPECTED_CALL(VECTOR_size(IGNORED_PTR_ARG)) /*this is passing the options*/ /*there are none saved in the regular sequences*/
             .IgnoreArgument(1);
 
@@ -2435,83 +2311,6 @@ TEST_FUNCTION(HTTPAPIEX_ExecuteRequest_TestCase_F3) /*refer to httpapiex_retry_m
     {
         STRICT_EXPECTED_CALL(HTTPAPI_CloseConnection(IGNORED_PTR_ARG))
             .IgnoreArgument(1);
-        STRICT_EXPECTED_CALL(HTTPAPI_Deinit());
-    }
-
-    /// act
-    HTTPAPIEX_RESULT result = HTTPAPIEX_ExecuteRequest(httpapiexhandle, HTTPAPI_REQUEST_CONNECT, TEST_RELATIVE_PATH, requestHttpHeaders, requestHttpBody, &httpStatusCode, responseHttpHeaders, responseHttpBody);
-
-    ///assert
-    ASSERT_ARE_EQUAL(HTTPAPIEX_RESULT, HTTPAPIEX_RECOVERYFAILED, result);
-    ASSERT_ARE_EQUAL(char_ptr, umock_c_get_expected_calls(), umock_c_get_actual_calls());
-
-    ///destroy
-    destroyHttpObjects(&requestHttpHeaders, &responseHttpHeaders);
-    HTTPAPIEX_Destroy(httpapiexhandle);
-}
-
-/*Tests_SRS_HTTPAPIEX_02_029: [Otherwise, HTTAPIEX_ExecuteRequest shall return HTTPAPIEX_RECOVERYFAILED.] */
-TEST_FUNCTION(HTTPAPIEX_ExecuteRequest_TestCase_F4) /*refer to httpapiex_retry_mechanism.vsdx*/
-{
-    /// arrange
-    HTTPAPIEX_HANDLE httpapiexhandle = HTTPAPIEX_Create(TEST_HOSTNAME);
-
-    unsigned int httpStatusCode;
-    unsigned int asGivenByHttpApi = 23;
-    HTTP_HEADERS_HANDLE requestHttpHeaders;
-    BUFFER_HANDLE requestHttpBody = TEST_BUFFER_REQ_BODY;
-    HTTP_HEADERS_HANDLE responseHttpHeaders;
-    BUFFER_HANDLE responseHttpBody = TEST_BUFFER_RESP_BODY;
-    createHttpObjects(&requestHttpHeaders, &responseHttpHeaders);
-    (void)HTTPAPIEX_ExecuteRequest(httpapiexhandle, HTTPAPI_REQUEST_CONNECT, TEST_RELATIVE_PATH, requestHttpHeaders, requestHttpBody, &httpStatusCode, responseHttpHeaders, responseHttpBody);
-    umock_c_reset_all_calls();
-
-    prepareHTTPAPIEX_ExecuteRequest(&asGivenByHttpApi, requestHttpHeaders, responseHttpHeaders, responseHttpBody, HTTPAPI_ERROR);
-
-    {
-        STRICT_EXPECTED_CALL(HTTPAPI_CloseConnection(IGNORED_PTR_ARG))
-            .IgnoreArgument(1);
-
-        STRICT_EXPECTED_CALL(STRING_c_str(IGNORED_PTR_ARG))
-            .IgnoreArgument(1);
-        STRICT_EXPECTED_CALL(HTTPAPI_CreateConnection(NULL, TEST_HOSTNAME, TEST_PORT_NUM));
-        STRICT_EXPECTED_CALL(VECTOR_size(IGNORED_PTR_ARG)) /*this is passing the options*/ /*there are none saved in the regular sequences*/
-            .IgnoreArgument(1);
-
-    }
-
-    {
-        STRICT_EXPECTED_CALL(BUFFER_length(IGNORED_PTR_ARG))
-            .IgnoreArgument(1);
-        STRICT_EXPECTED_CALL(BUFFER_u_char(IGNORED_PTR_ARG))
-            .IgnoreArgument(1);
-        STRICT_EXPECTED_CALL(HTTPAPI_ExecuteRequest(
-            IGNORED_PTR_ARG,
-            HTTPAPI_REQUEST_CONNECT,
-            TEST_RELATIVE_PATH,
-            requestHttpHeaders,
-            IGNORED_PTR_ARG,
-            TEST_BUFFER_SIZE,
-            IGNORED_PTR_ARG,
-            responseHttpHeaders,
-            responseHttpBody))
-            .IgnoreArgument(1)
-            .IgnoreArgument(4)
-            .IgnoreArgument(5)
-            .IgnoreArgument(7)
-            .ValidateArgumentBuffer(5, TEST_BUFFER, TEST_BUFFER_SIZE)
-            .CopyOutArgumentBuffer(7, &asGivenByHttpApi, sizeof(asGivenByHttpApi))
-            .SetReturn(HTTPAPI_ERROR);
-        ;
-    }
-
-    {
-        STRICT_EXPECTED_CALL(HTTPAPI_CloseConnection(IGNORED_PTR_ARG))
-            .IgnoreArgument(1);
-        STRICT_EXPECTED_CALL(HTTPAPI_Deinit());
-
-        whenShallHTTPAPI_Init_fail[0] = currentHTTPAPI_Init_call + 1;
-        STRICT_EXPECTED_CALL(HTTPAPI_Init());
     }
 
     /// act
@@ -2550,7 +2349,7 @@ TEST_FUNCTION(HTTPAPIEX_ExecuteRequest_TestCase_F5) /*refer to httpapiex_retry_m
 
         STRICT_EXPECTED_CALL(STRING_c_str(IGNORED_PTR_ARG))
             .IgnoreArgument(1);
-        STRICT_EXPECTED_CALL(HTTPAPI_CreateConnection(NULL, TEST_HOSTNAME, TEST_PORT_NUM));
+        EXPECTED_CALL(HTTPAPI_CreateConnection(IGNORED_PTR_ARG, TEST_HOSTNAME, TEST_PORT_NUM));
         STRICT_EXPECTED_CALL(VECTOR_size(IGNORED_PTR_ARG)) /*this is passing the options*/ /*there are none saved in the regular sequences*/
             .IgnoreArgument(1);
 
@@ -2584,20 +2383,15 @@ TEST_FUNCTION(HTTPAPIEX_ExecuteRequest_TestCase_F5) /*refer to httpapiex_retry_m
     {
         STRICT_EXPECTED_CALL(HTTPAPI_CloseConnection(IGNORED_PTR_ARG))
             .IgnoreArgument(1); 
-        STRICT_EXPECTED_CALL(HTTPAPI_Deinit());
-        STRICT_EXPECTED_CALL(HTTPAPI_Init());
     }
 
     {
         STRICT_EXPECTED_CALL(STRING_c_str(IGNORED_PTR_ARG))
             .IgnoreArgument(1);
         whenShallHTTPAPI_CreateConnection_fail[1] = currentHTTPAPI_CreateConnection_call + 2;
-        STRICT_EXPECTED_CALL(HTTPAPI_CreateConnection(NULL, TEST_HOSTNAME, TEST_PORT_NUM));
+        EXPECTED_CALL(HTTPAPI_CreateConnection(IGNORED_PTR_ARG, TEST_HOSTNAME, TEST_PORT_NUM));
     }
 
-    {
-        STRICT_EXPECTED_CALL(HTTPAPI_Deinit());
-    }
 
     /// act
     HTTPAPIEX_RESULT result = HTTPAPIEX_ExecuteRequest(httpapiexhandle, HTTPAPI_REQUEST_CONNECT, TEST_RELATIVE_PATH, requestHttpHeaders, requestHttpBody, &httpStatusCode, responseHttpHeaders, responseHttpBody);
@@ -2635,7 +2429,7 @@ TEST_FUNCTION(HTTPAPIEX_ExecuteRequest_TestCase_F6) /*refer to httpapiex_retry_m
 
         STRICT_EXPECTED_CALL(STRING_c_str(IGNORED_PTR_ARG))
             .IgnoreArgument(1);
-        STRICT_EXPECTED_CALL(HTTPAPI_CreateConnection(NULL, TEST_HOSTNAME, TEST_PORT_NUM));
+        EXPECTED_CALL(HTTPAPI_CreateConnection(IGNORED_PTR_ARG, TEST_HOSTNAME, TEST_PORT_NUM));
         STRICT_EXPECTED_CALL(VECTOR_size(IGNORED_PTR_ARG)) /*this is passing the options*/ /*there are none saved in the regular sequences*/
             .IgnoreArgument(1);
 
@@ -2669,14 +2463,12 @@ TEST_FUNCTION(HTTPAPIEX_ExecuteRequest_TestCase_F6) /*refer to httpapiex_retry_m
     {
         STRICT_EXPECTED_CALL(HTTPAPI_CloseConnection(IGNORED_PTR_ARG))
             .IgnoreArgument(1);
-        STRICT_EXPECTED_CALL(HTTPAPI_Deinit());
-        STRICT_EXPECTED_CALL(HTTPAPI_Init());
     }
 
     {
         STRICT_EXPECTED_CALL(STRING_c_str(IGNORED_PTR_ARG))
             .IgnoreArgument(1);
-        STRICT_EXPECTED_CALL(HTTPAPI_CreateConnection(NULL, TEST_HOSTNAME, TEST_PORT_NUM));
+        EXPECTED_CALL(HTTPAPI_CreateConnection(IGNORED_PTR_ARG, TEST_HOSTNAME, TEST_PORT_NUM));
         STRICT_EXPECTED_CALL(VECTOR_size(IGNORED_PTR_ARG)) /*this is passing the options*/ /*there are none saved in the regular sequences*/
             .IgnoreArgument(1);
 
@@ -2710,7 +2502,6 @@ TEST_FUNCTION(HTTPAPIEX_ExecuteRequest_TestCase_F6) /*refer to httpapiex_retry_m
     {
         STRICT_EXPECTED_CALL(HTTPAPI_CloseConnection(IGNORED_PTR_ARG))
             .IgnoreArgument(1);
-        STRICT_EXPECTED_CALL(HTTPAPI_Deinit());
     }
 
     /// act
@@ -2866,12 +2657,11 @@ TEST_FUNCTION(HTTPAPIEX_SetOption_passes_saved_options_to_httpapi_succeeds)
     umock_c_reset_all_calls();
 
     setupAllCallBeforeHTTPsequence();
-    STRICT_EXPECTED_CALL(HTTPAPI_Init());
 
     /*this is getting the hostname for the HTTAPI_connect call)*/
     STRICT_EXPECTED_CALL(STRING_c_str(IGNORED_PTR_ARG))
         .IgnoreArgument(1);
-    STRICT_EXPECTED_CALL(HTTPAPI_CreateConnection(NULL, TEST_HOSTNAME, TEST_PORT_NUM));
+    EXPECTED_CALL(HTTPAPI_CreateConnection(IGNORED_PTR_ARG, TEST_HOSTNAME, TEST_PORT_NUM));
     STRICT_EXPECTED_CALL(VECTOR_size(IGNORED_PTR_ARG)) /*this is passing the options*/ /*there are none saved in the regular sequences*/
         .IgnoreArgument(1);
 
@@ -2940,12 +2730,11 @@ TEST_FUNCTION(HTTPAPIEX_SetOption_passes_saved_options_to_httpapi_ignores_errors
     umock_c_reset_all_calls();
 
     setupAllCallBeforeHTTPsequence();
-    STRICT_EXPECTED_CALL(HTTPAPI_Init());
 
     /*this is getting the hostname for the HTTAPI_connect call)*/
     STRICT_EXPECTED_CALL(STRING_c_str(IGNORED_PTR_ARG))
         .IgnoreArgument(1);
-    STRICT_EXPECTED_CALL(HTTPAPI_CreateConnection(NULL, TEST_HOSTNAME, TEST_PORT_NUM));
+    EXPECTED_CALL(HTTPAPI_CreateConnection(IGNORED_PTR_ARG, TEST_HOSTNAME, TEST_PORT_NUM));
     STRICT_EXPECTED_CALL(VECTOR_size(IGNORED_PTR_ARG)) /*this is passing the options*/ /*there are none saved in the regular sequences*/
         .IgnoreArgument(1);
 

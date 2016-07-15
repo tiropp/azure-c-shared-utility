@@ -86,10 +86,8 @@ static HTTP_HEADERS_RESULT g_hdr_result = HTTP_HEADERS_OK;
 static const size_t TEXT_CONTENT_LENGTH = 70;
 
 static const char* TEST_STRING_VALUE = "Test string value";
-static const char* TEST_CERTIFICATE_VALUE = "Test certificate Info";
 static const char* TEST_RELATIVE_PATH = "/";
 static const unsigned char* TEST_HTTP_CONTENT = (const unsigned char*)"grant_type=client_credentials&client_id=d14d2b5&client_secret=shhhhhh";
-static const char* OPTION_TRUSTED_CERTS = "TrustedCerts";
 static const char* OPTION_LOG_TRACE = "logtrace";
 static const char* INVALID_OPTION_LOG_TRACE = "invalid_option";
 
@@ -336,6 +334,7 @@ static void my_on_execute_complete(void* callback_context, HTTPAPI_RESULT execut
     (void)responseBuffer;
 }
 
+/* Tests_SRS_HTTPAPI_07_002: [If any argument is NULL, HTTPAPI_CreateConnection shall return a NULL handle.] */
 TEST_FUNCTION(httpapi_createconnection_hostname_NULL_fail)
 {
     //arrange
@@ -350,6 +349,7 @@ TEST_FUNCTION(httpapi_createconnection_hostname_NULL_fail)
     // Cleanup
 }
 
+/* Tests_SRS_HTTPAPI_07_002: [If any argument is NULL, HTTPAPI_CreateConnection shall return a NULL handle.] */
 TEST_FUNCTION(httpapi_createconnection_XIO_HANDLE_NULL_fail)
 {
     //arrange
@@ -364,6 +364,7 @@ TEST_FUNCTION(httpapi_createconnection_XIO_HANDLE_NULL_fail)
     // Cleanup
 }
 
+/* Tests_SRS_HTTPAPI_07_004: [If the hostName parameter is greater than 64 characters then, HTTPAPI_CreateConnection shall return a NULL handle (rfc1035 2.3.1).] */
 TEST_FUNCTION(httpapi_createconnection_hostname_too_long_fail)
 {
     //arrange
@@ -387,6 +388,7 @@ TEST_FUNCTION(httpapi_createconnection_hostname_too_long_fail)
     // Cleanup
 }
 
+/* Tests_SRS_HTTPAPI_07_003: [If any failure is encountered, HTTPAPI_CreateConnection shall return a NULL handle.] */
 TEST_FUNCTION(httpapi_createconnection_allocation_fail)
 {
     //arrange
@@ -406,6 +408,7 @@ TEST_FUNCTION(httpapi_createconnection_allocation_fail)
     // Cleanup
 }
 
+/* Tests_SRS_HTTPAPI_07_003: [If any failure is encountered, HTTPAPI_CreateConnection shall return a NULL handle.] */
 TEST_FUNCTION(httpapi_createconnection_mallocAndStrcpy_fail)
 {
     //arrange
@@ -427,6 +430,7 @@ TEST_FUNCTION(httpapi_createconnection_mallocAndStrcpy_fail)
     // Cleanup
 }
 
+/* Tests_SRS_HTTPAPI_07_003: [If any failure is encountered, HTTPAPI_CreateConnection shall return a NULL handle.] */
 TEST_FUNCTION(httpapi_createconnection_xio_open_fail)
 {
     //arrange
@@ -458,6 +462,8 @@ TEST_FUNCTION(httpapi_createconnection_xio_open_fail)
     HTTPAPI_CloseConnection(handle);
 }
 
+/* Tests_SRS_HTTPAPI_07_001: [HTTPAPI_CreateConnection shall return on success a non-NULL handle to the HTTP interface.]*/
+/* Tests_SRS_HTTPAPI_07_005: [HTTPAPI_CreateConnection shall open the transport channel specified in the io parameter.] */
 TEST_FUNCTION(httpapi_createconnection_succeed)
 {
     //arrange
@@ -477,6 +483,7 @@ TEST_FUNCTION(httpapi_createconnection_succeed)
     HTTPAPI_CloseConnection(http_handle);
 }
 
+/* Tests_SRS_HTTPAPI_07_006: [If the handle parameter is NULL, HTTPAPI_CloseConnection shall do nothing.] */
 TEST_FUNCTION(httpapi_closeconnection_handle_null_succeed)
 {
     //arrange
@@ -490,27 +497,8 @@ TEST_FUNCTION(httpapi_closeconnection_handle_null_succeed)
     // Cleanup
 }
 
-TEST_FUNCTION(httpapi_closeconnection_with_certificate_succeed)
-{
-    //arrange
-    HTTP_HANDLE handle = HTTPAPI_CreateConnection(TEST_IO_HANDLE, TEST_HOSTNAME, 443);
-    ASSERT_ARE_EQUAL(HTTPAPI_RESULT, HTTPAPI_SetOption(handle, "logtrace", TEST_CERTIFICATE_VALUE), HTTPAPI_OK);
-
-    umock_c_reset_all_calls();
-
-    EXPECTED_CALL(xio_close(TEST_IO_HANDLE, IGNORED_PTR_ARG, IGNORED_PTR_ARG));
-    EXPECTED_CALL(gballoc_free(IGNORED_PTR_ARG));
-    EXPECTED_CALL(gballoc_free(IGNORED_PTR_ARG));
-
-    //act
-    HTTPAPI_CloseConnection(handle);
-
-    //assert
-    ASSERT_ARE_EQUAL(char_ptr, umock_c_get_expected_calls(), umock_c_get_actual_calls());
-
-    // Cleanup
-}
-
+/* Tests_SRS_HTTPAPI_07_008: [HTTPAPI_CloseConnection shall close the transport channel associated with this connection.] */
+/* Tests_SRS_HTTPAPI_07_007: [HTTPAPI_CloseConnection shall free all resources associated with the HTTP_HANDLE.] */
 TEST_FUNCTION(httpapi_closeconnection_succeed)
 {
     //arrange
@@ -530,6 +518,7 @@ TEST_FUNCTION(httpapi_closeconnection_succeed)
     // Cleanup
 }
 
+/* Tests_SRS_HTTPAPI_07_009: [If the parameters handle or relativePath are NULL, HTTPAPI_ExecuteRequestAsync shall return HTTPAPI_INVALID_ARG.] */
 TEST_FUNCTION(httpapi_executerequestasync_HANDLE_NULL_fail)
 {
     //arrange
@@ -544,6 +533,7 @@ TEST_FUNCTION(httpapi_executerequestasync_HANDLE_NULL_fail)
     // Cleanup
 }
 
+/* Tests_SRS_HTTPAPI_07_009: [If the parameters handle or relativePath are NULL, HTTPAPI_ExecuteRequestAsync shall return HTTPAPI_INVALID_ARG.] */
 TEST_FUNCTION(httpapi_executerequestasync_relativePath_NULL_fail)
 {
     //arrange
@@ -561,6 +551,7 @@ TEST_FUNCTION(httpapi_executerequestasync_relativePath_NULL_fail)
     HTTPAPI_CloseConnection(handle);
 }
 
+/* Tests_SRS_HTTPAPI_07_010: [If the parameters content is not NULL and contentLength is 0 or content is NULL and contentLength is not 0, HTTPAPI_ExecuteRequestAsync shall return HTTPAPI_INVALID_ARG.] */
 TEST_FUNCTION(httpapi_executerequestasync_content_NULL_contentLength_valid_fail)
 {
     //arrange
@@ -578,6 +569,7 @@ TEST_FUNCTION(httpapi_executerequestasync_content_NULL_contentLength_valid_fail)
     HTTPAPI_CloseConnection(handle);
 }
 
+/* Tests_SRS_HTTPAPI_07_010: [If the parameters content is not NULL and contentLength is 0 or content is NULL and contentLength is not 0, HTTPAPI_ExecuteRequestAsync shall return HTTPAPI_INVALID_ARG.] */
 TEST_FUNCTION(httpapi_executerequestasync_content_valid_contentLength_0_fail)
 {
     //arrange
@@ -595,6 +587,7 @@ TEST_FUNCTION(httpapi_executerequestasync_content_valid_contentLength_0_fail)
     HTTPAPI_CloseConnection(handle);
 }
 
+/* Tests_SRS_HTTPAPI_07_013: [If HTTPAPI_ExecuteRequestAsync is called before a previous call is complete, HTTPAPI_ExecuteRequestAsync shall return HTTPAPI_IN_PROGRESS.] */
 TEST_FUNCTION(httpapi_executerequestasync_invalid_state_fail)
 {
     //arrange
@@ -614,6 +607,7 @@ TEST_FUNCTION(httpapi_executerequestasync_invalid_state_fail)
     HTTPAPI_CloseConnection(handle);
 }
 
+/* Tests_SRS_HTTPAPI_07_026: [If an error is encountered during the request line construction HTTPAPI_ExecuteRequestAsync shall return HTTPAPI_REQUEST_LINE_PROCESSING_ERROR.] */
 TEST_FUNCTION(httpapi_executerequestasync_string_proc_alloc_fail)
 {
     //arrange
@@ -628,13 +622,14 @@ TEST_FUNCTION(httpapi_executerequestasync_string_proc_alloc_fail)
     HTTPAPI_RESULT http_result = HTTPAPI_ExecuteRequestAsync(handle, HTTPAPI_REQUEST_GET, TEST_RELATIVE_PATH, NULL, NULL, 0, my_on_execute_complete, NULL);
 
     //assert
-    ASSERT_ARE_EQUAL(HTTPAPI_RESULT, HTTPAPI_STRING_PROCESSING_ERROR, http_result);
+    ASSERT_ARE_EQUAL(HTTPAPI_RESULT, HTTPAPI_REQUEST_LINE_PROCESSING_ERROR, http_result);
     ASSERT_ARE_EQUAL(char_ptr, umock_c_get_expected_calls(), umock_c_get_actual_calls());
 
     // Cleanup
     HTTPAPI_CloseConnection(handle);
 }
 
+/* Tests_SRS_HTTPAPI_07_027: [If any memory allocation are encountered HTTPAPI_ExecuteRequestAsync shall return HTTPAPI_ALLOC_FAILED.] */
 TEST_FUNCTION(httpapi_executerequestasync_string_construct_fail)
 {
     //arrange
@@ -658,6 +653,7 @@ TEST_FUNCTION(httpapi_executerequestasync_string_construct_fail)
     HTTPAPI_CloseConnection(handle);
 }
 
+/* Tests_SRS_HTTPAPI_07_028: [If sending data through the xio object fails HTTPAPI_ExecuteRequestAsync shall return HTTPAPI_SEND_REQUEST_FAILED.] */
 TEST_FUNCTION(httpapi_executerequestasync_xio_send_returns_fail)
 {
     //arrange
@@ -689,6 +685,8 @@ TEST_FUNCTION(httpapi_executerequestasync_xio_send_returns_fail)
     HTTPAPI_CloseConnection(handle);
 }
 
+/* Tests_SRS_HTTPAPI_07_022: [HTTPAPI_ExecuteRequestAsync shall support all valid HTTP request types (rfc7231 4.3).] */
+/* Tests_SRS_HTTPAPI_07_014: [HTTPAPI_ExecuteRequestAsync shall add the HOST http header to the request if not supplied (rfc7230 5.4).] */
 TEST_FUNCTION(httpapi_executerequestasync_GET_succeed)
 {
     //arrange
@@ -718,6 +716,7 @@ TEST_FUNCTION(httpapi_executerequestasync_GET_succeed)
     HTTPAPI_CloseConnection(handle);
 }
 
+/* Tests_SRS_HTTPAPI_07_011: [If the requestType parameter is of type POST and the contentLength not supplied HTTPAPI_ExecuteRequestAsync shall add the contentLength header (rfc7230 3.3.2).] */
 TEST_FUNCTION(httpapi_executerequestasync_GET_content_len_request_included_succeed)
 {
     //arrange
@@ -761,6 +760,7 @@ TEST_FUNCTION(httpapi_executerequestasync_GET_content_len_request_included_succe
     HTTPAPI_CloseConnection(handle);
 }
 
+/* Tests_SRS_HTTPAPI_07_014: [HTTPAPI_ExecuteRequestAsync shall add the HOST http header to the request if not supplied (rfc7230 5.4).] */
 TEST_FUNCTION(httpapi_executerequestasync_GET_host_request_included_succeed)
 {
     //arrange
@@ -804,6 +804,7 @@ TEST_FUNCTION(httpapi_executerequestasync_GET_host_request_included_succeed)
     HTTPAPI_CloseConnection(handle);
 }
 
+/* Tests_SRS_HTTPAPI_07_029: [If an error is encountered during the construction of the http headers HTTPAPI_ExecuteRequestAsync shall return HTTPAPI_HTTP_HEADERS_FAILED.] */
 TEST_FUNCTION(httpapi_executerequestasync_GetHeader_return_ERROR_fail)
 {
     //arrange
@@ -836,6 +837,7 @@ TEST_FUNCTION(httpapi_executerequestasync_GetHeader_return_ERROR_fail)
     HTTPAPI_CloseConnection(handle);
 }
 
+/* Tests_SRS_HTTPAPI_07_029: [If an error is encountered during the construction of the http headers HTTPAPI_ExecuteRequestAsync shall return HTTPAPI_HTTP_HEADERS_FAILED.] */
 TEST_FUNCTION(httpapi_executerequestasync_GetHeaderCount_return_0_fail)
 {
     //arrange
@@ -864,6 +866,7 @@ TEST_FUNCTION(httpapi_executerequestasync_GetHeaderCount_return_0_fail)
     HTTPAPI_CloseConnection(handle);
 }
 
+/* Tests_SRS_HTTPAPI_07_022: [HTTPAPI_ExecuteRequestAsync shall support all valid HTTP request types (rfc7231 4.3).] */
 TEST_FUNCTION(httpapi_executerequestasync_HEAD_type_succeed)
 {
     //arrange
@@ -893,6 +896,9 @@ TEST_FUNCTION(httpapi_executerequestasync_HEAD_type_succeed)
     HTTPAPI_CloseConnection(handle);
 }
 
+/* Tests_SRS_HTTPAPI_07_022: [HTTPAPI_ExecuteRequestAsync shall support all valid HTTP request types (rfc7231 4.3).] */
+/* Tests_SRS_HTTPAPI_07_012: [HTTPAPI_ExecuteRequestAsync shall add the Content-Length http header to the request if not supplied and the length of the content is > 0 or the requestType is a POST (rfc7230 3.3.2).] */
+/* Tests_SRS_HTTPAPI_07_011: [If the requestType parameter is of type POST and the contentLength not supplied HTTPAPI_ExecuteRequestAsync shall add the contentLength header (rfc7230 3.3.2).] */
 TEST_FUNCTION(httpapi_executerequestasync_POST_succeed)
 {
     //arrange
@@ -942,6 +948,7 @@ TEST_FUNCTION(httpapi_executerequestasync_POST_succeed)
     HTTPAPI_CloseConnection(handle);
 }
 
+/* Tests_SRS_HTTPAPI_07_029: [If an error is encountered during the construction of the http headers HTTPAPI_ExecuteRequestAsync shall return HTTPAPI_HTTP_HEADERS_FAILED.] */
 TEST_FUNCTION(httpapi_executerequestasync_POST_string_concat_return_0_fail)
 {
     //arrange
@@ -962,17 +969,19 @@ TEST_FUNCTION(httpapi_executerequestasync_POST_string_concat_return_0_fail)
     HTTPAPI_RESULT http_result = HTTPAPI_ExecuteRequestAsync(handle, HTTPAPI_REQUEST_POST, TEST_RELATIVE_PATH, TEST_HEADER_HANDLE, TEST_HTTP_CONTENT, TEXT_CONTENT_LENGTH, my_on_execute_complete, NULL);
 
     //assert
-    ASSERT_ARE_EQUAL(HTTPAPI_RESULT, HTTPAPI_STRING_PROCESSING_ERROR, http_result);
+    ASSERT_ARE_EQUAL(HTTPAPI_RESULT, HTTPAPI_HTTP_HEADERS_FAILED, http_result);
     ASSERT_ARE_EQUAL(char_ptr, umock_c_get_expected_calls(), umock_c_get_actual_calls());
 
     // Cleanup
     HTTPAPI_CloseConnection(handle);
 }
 
+/* Tests_SRS_HTTPAPI_07_012: [HTTPAPI_ExecuteRequestAsync shall add the Content-Length http header to the request if not supplied and the length of the content is > 0 or the requestType is a POST (rfc7230 3.3.2).] */
+/* Tests_SRS_HTTPAPI_07_025: [HTTPAPI_ExecuteRequestAsync shall use authority form of the request target if the port value is not the default http port (port 80) (rfc7230 5.3.3).] */
 TEST_FUNCTION(httpapi_executerequestasync_DELETE_succeed)
 {
     //arrange
-    HTTP_HANDLE handle = HTTPAPI_CreateConnection(TEST_IO_HANDLE, TEST_HOSTNAME, 443);
+    HTTP_HANDLE handle = HTTPAPI_CreateConnection(TEST_IO_HANDLE, TEST_HOSTNAME, 8080);
     umock_c_reset_all_calls();
 
     EXPECTED_CALL(gballoc_malloc(IGNORED_NUM_ARG));
@@ -1010,6 +1019,8 @@ TEST_FUNCTION(httpapi_executerequestasync_DELETE_succeed)
     HTTPAPI_CloseConnection(handle);
 }
 
+/* Tests_SRS_HTTPAPI_07_022: [HTTPAPI_ExecuteRequestAsync shall support all valid HTTP request types (rfc7231 4.3).] */
+/* Tests_SRS_HTTPAPI_07_012: [HTTPAPI_ExecuteRequestAsync shall add the Content-Length http header to the request if not supplied and the length of the content is > 0 or the requestType is a POST (rfc7230 3.3.2).] */
 TEST_FUNCTION(httpapi_executerequestasync_PUT_succeed)
 {
     //arrange
@@ -1062,6 +1073,7 @@ TEST_FUNCTION(httpapi_executerequestasync_PUT_succeed)
     HTTPAPI_CloseConnection(handle);
 }
 
+/* Tests_SRS_HTTPAPI_07_028: [If sending data through the xio object fails HTTPAPI_ExecuteRequestAsync shall return HTTPAPI_SEND_REQUEST_FAILED.] */
 TEST_FUNCTION(httpapi_executerequestasync_content_send_fail)
 {
     //arrange
@@ -1116,6 +1128,9 @@ TEST_FUNCTION(httpapi_executerequestasync_content_send_fail)
     HTTPAPI_CloseConnection(handle);
 }
 
+/* Tests_SRS_HTTPAPI_07_022: [HTTPAPI_ExecuteRequestAsync shall support all valid HTTP request types (rfc7231 4.3).] */
+/* Tests_SRS_HTTPAPI_07_023: [If the HTTPAPI_REQUEST_CONNECT type is specified HTTPAPI_ExecuteRequestAsync shall send the authority form of the request target ie 'Host: server.com:80' (rfc7231 4.3.6).] */
+/* Tests_SRS_HTTPAPI_07_024: [HTTPAPI_ExecuteRequestAsync shall use absolute-form when generating the request Target (rfc7230 5.3.2).] */
 TEST_FUNCTION(httpapi_executerequestasync_CONNECT_succeed)
 {
     //arrange
@@ -1145,6 +1160,7 @@ TEST_FUNCTION(httpapi_executerequestasync_CONNECT_succeed)
     HTTPAPI_CloseConnection(handle);
 }
 
+/* Tests_SRS_HTTPAPI_07_022: [HTTPAPI_ExecuteRequestAsync shall support all valid HTTP request types (rfc7231 4.3).] */
 TEST_FUNCTION(httpapi_executerequestasync_OPTIONS_succeed)
 {
     //arrange
@@ -1174,6 +1190,7 @@ TEST_FUNCTION(httpapi_executerequestasync_OPTIONS_succeed)
     HTTPAPI_CloseConnection(handle);
 }
 
+/* Tests_SRS_HTTPAPI_07_022: [HTTPAPI_ExecuteRequestAsync shall support all valid HTTP request types (rfc7231 4.3).] */
 TEST_FUNCTION(httpapi_executerequestasync_TRACE_succeed)
 {
     //arrange
@@ -1203,6 +1220,7 @@ TEST_FUNCTION(httpapi_executerequestasync_TRACE_succeed)
     HTTPAPI_CloseConnection(handle);
 }
 
+/* Tests_SRS_HTTPAPI_07_016: [HTTPAPI_DoWork shall call into the XIO_HANDLE do work to execute transport communications.] */
 TEST_FUNCTION(httpapi_doWork_succeed)
 {
     //arrange
@@ -1221,6 +1239,7 @@ TEST_FUNCTION(httpapi_doWork_succeed)
     HTTPAPI_CloseConnection(handle);
 }
 
+/* Tests_SRS_HTTPAPI_07_015: [If the handle parameter is NULL, HTTPAPI_DoWork shall do nothing.] */
 TEST_FUNCTION(httpapi_doWork_handle_NULL_fail)
 {
     //arrange
@@ -1234,12 +1253,14 @@ TEST_FUNCTION(httpapi_doWork_handle_NULL_fail)
     // Cleanup
 }
 
+/* Tests_SRS_HTTPAPI_07_018: [If handle or optionName parameters are NULL then HTTPAPI_SetOption shall return HTTP_CLIENT_INVALID_ARG.] */
 TEST_FUNCTION(httpapi_setoption_handle_NULL_fail)
 {
     //arrange
 
     //act
-    HTTPAPI_RESULT http_result = HTTPAPI_SetOption(NULL, OPTION_TRUSTED_CERTS, (const void*)TEST_CERTIFICATE_VALUE);
+    bool logtrace = true;
+    HTTPAPI_RESULT http_result = HTTPAPI_SetOption(NULL, OPTION_LOG_TRACE, (const void*)&logtrace);
 
     //assert
     ASSERT_ARE_EQUAL(HTTPAPI_RESULT, HTTPAPI_INVALID_ARG, http_result);
@@ -1248,6 +1269,7 @@ TEST_FUNCTION(httpapi_setoption_handle_NULL_fail)
     // Cleanup
 }
 
+/* Tests_SRS_HTTPAPI_07_018: [If handle or optionName parameters are NULL then HTTPAPI_SetOption shall return HTTP_CLIENT_INVALID_ARG.] */
 TEST_FUNCTION(httpapi_setoption_option_name_NULL_fail)
 {
     //arrange
@@ -1266,6 +1288,7 @@ TEST_FUNCTION(httpapi_setoption_option_name_NULL_fail)
     HTTPAPI_CloseConnection(handle);
 }
 
+/* Tests_SRS_HTTPAPI_07_019: [If HTTPAPI_SetOption encounteres a optionName that is not recognized HTTPAPI_SetOption shall return HTTP_CLIENT_INVALID_ARG.] */
 TEST_FUNCTION(httpapi_setoption_unknown_option_name_fail)
 {
     //arrange
@@ -1284,86 +1307,7 @@ TEST_FUNCTION(httpapi_setoption_unknown_option_name_fail)
     HTTPAPI_CloseConnection(handle);
 }
 
-TEST_FUNCTION(httpapi_setoption_trusted_certs_succeed)
-{
-    //arrange
-    HTTP_HANDLE handle = HTTPAPI_CreateConnection(TEST_IO_HANDLE, TEST_HOSTNAME, 443);
-    umock_c_reset_all_calls();
-
-    EXPECTED_CALL(gballoc_malloc(IGNORED_NUM_ARG));
-
-    //act
-    HTTPAPI_RESULT http_result = HTTPAPI_SetOption(handle, OPTION_TRUSTED_CERTS, (const void*)TEST_CERTIFICATE_VALUE);
-
-    //assert
-    ASSERT_ARE_EQUAL(HTTPAPI_RESULT, HTTPAPI_OK, http_result);
-    ASSERT_ARE_EQUAL(char_ptr, umock_c_get_expected_calls(), umock_c_get_actual_calls());
-
-    // Cleanup
-    HTTPAPI_CloseConnection(handle);
-}
-
-TEST_FUNCTION(httpapi_setoption_trusted_certs_alloc_NULL_fail)
-{
-    //arrange
-    HTTP_HANDLE handle = HTTPAPI_CreateConnection(TEST_IO_HANDLE, TEST_HOSTNAME, 443);
-    umock_c_reset_all_calls();
-
-    g_fail_alloc_calls = 2;
-
-    EXPECTED_CALL(gballoc_malloc(IGNORED_NUM_ARG));
-
-    //act
-    HTTPAPI_RESULT http_result = HTTPAPI_SetOption(handle, OPTION_TRUSTED_CERTS, (const void*)TEST_CERTIFICATE_VALUE);
-
-    //assert
-    ASSERT_ARE_EQUAL(HTTPAPI_RESULT, HTTPAPI_ALLOC_FAILED, http_result);
-    ASSERT_ARE_EQUAL(char_ptr, umock_c_get_expected_calls(), umock_c_get_actual_calls());
-
-    // Cleanup
-    HTTPAPI_CloseConnection(handle);
-}
-
-TEST_FUNCTION(httpapi_setoption_trusted_certs_NULL_value_fail)
-{
-    //arrange
-    HTTP_HANDLE handle = HTTPAPI_CreateConnection(TEST_IO_HANDLE, TEST_HOSTNAME, 443);
-    umock_c_reset_all_calls();
-
-    //act
-    HTTPAPI_RESULT http_result = HTTPAPI_SetOption(handle, OPTION_TRUSTED_CERTS, NULL);
-
-    //assert
-    ASSERT_ARE_EQUAL(HTTPAPI_RESULT, HTTPAPI_INVALID_ARG, http_result);
-    ASSERT_ARE_EQUAL(char_ptr, umock_c_get_expected_calls(), umock_c_get_actual_calls());
-
-    // Cleanup
-    HTTPAPI_CloseConnection(handle);
-}
-
-TEST_FUNCTION(httpapi_setoption_trusted_certs_2_calls_succeed)
-{
-    //arrange
-    HTTP_HANDLE handle = HTTPAPI_CreateConnection(TEST_IO_HANDLE, TEST_HOSTNAME, 443);
-    HTTPAPI_RESULT http_result = HTTPAPI_SetOption(handle, OPTION_TRUSTED_CERTS, (const void*)TEST_CERTIFICATE_VALUE);
-    ASSERT_ARE_EQUAL(HTTPAPI_RESULT, HTTPAPI_OK, http_result);
-
-    umock_c_reset_all_calls();
-
-    EXPECTED_CALL(gballoc_free(IGNORED_PTR_ARG));
-    EXPECTED_CALL(gballoc_malloc(IGNORED_NUM_ARG));
-
-    //act
-    http_result = HTTPAPI_SetOption(handle, OPTION_TRUSTED_CERTS, (const void*)TEST_CERTIFICATE_VALUE);
-
-    //assert
-    ASSERT_ARE_EQUAL(HTTPAPI_RESULT, HTTPAPI_OK, http_result);
-    ASSERT_ARE_EQUAL(char_ptr, umock_c_get_expected_calls(), umock_c_get_actual_calls());
-
-    // Cleanup
-    HTTPAPI_CloseConnection(handle);
-}
-
+/* Tests_SRS_HTTPAPI_07_031: [If a specified option recieved an unsuspected NULL value HTTPAPI_SetOption shall return HTTPAPI_INVALID_ARG.] */
 TEST_FUNCTION(httpapi_setoption_log_trace_value_NULL_fail)
 {
     //arrange
@@ -1381,6 +1325,7 @@ TEST_FUNCTION(httpapi_setoption_log_trace_value_NULL_fail)
     HTTPAPI_CloseConnection(handle);
 }
 
+/* Tests_SRS_HTTPAPI_07_017: [If HTTPAPI_SetOption successfully sets the given option with the supplied value it shall return HTTPAPI_OK.] */
 TEST_FUNCTION(httpapi_setoption_log_trace_succeed)
 {
     //arrange
@@ -1399,44 +1344,49 @@ TEST_FUNCTION(httpapi_setoption_log_trace_succeed)
     HTTPAPI_CloseConnection(handle);
 }
 
+/* Tests_SRS_HTTPAPI_07_021: [If any parameter is NULL then HTTPAPI_CloneOption shall return HTTPAPI_INVALID_ARG.] */
 TEST_FUNCTION(httpapi_cloneoption_optionName_NULL_fail)
 {
     //arrange
 
     //act
-    char* cert = NULL;
-    HTTPAPI_RESULT http_result = HTTPAPI_CloneOption(NULL, TEST_CERTIFICATE_VALUE, (const void**)&cert);
+    bool trace = false;
+    bool* savedValue = NULL;
+    HTTPAPI_RESULT http_result = HTTPAPI_CloneOption(NULL, &trace, (const void**)&savedValue);
 
     //assert
     ASSERT_ARE_EQUAL(HTTPAPI_RESULT, HTTPAPI_INVALID_ARG, http_result);
-    ASSERT_IS_NULL(cert);
+    ASSERT_IS_NULL(savedValue);
     ASSERT_ARE_EQUAL(char_ptr, umock_c_get_expected_calls(), umock_c_get_actual_calls());
 
     // Cleanup
 }
 
+/* Tests_SRS_HTTPAPI_07_021: [If any parameter is NULL then HTTPAPI_CloneOption shall return HTTPAPI_INVALID_ARG.] */
 TEST_FUNCTION(httpapi_cloneoption_value_NULL_fail)
 {
     //arrange
 
     //act
-    char* cert = NULL;
-    HTTPAPI_RESULT http_result = HTTPAPI_CloneOption(OPTION_TRUSTED_CERTS, NULL, (const void**)&cert);
+    bool* savedValue = NULL;
+    HTTPAPI_RESULT http_result = HTTPAPI_CloneOption(OPTION_LOG_TRACE, NULL, (const void**)&savedValue);
 
     //assert
     ASSERT_ARE_EQUAL(HTTPAPI_RESULT, HTTPAPI_INVALID_ARG, http_result);
-    ASSERT_IS_NULL(cert);
+    ASSERT_IS_NULL(savedValue);
     ASSERT_ARE_EQUAL(char_ptr, umock_c_get_expected_calls(), umock_c_get_actual_calls());
 
     // Cleanup
 }
 
+/* Tests_SRS_HTTPAPI_07_021: [If any parameter is NULL then HTTPAPI_CloneOption shall return HTTPAPI_INVALID_ARG.] */
 TEST_FUNCTION(httpapi_cloneoption_savedvalue_NULL_fail)
 {
     //arrange
 
     //act
-    HTTPAPI_RESULT http_result = HTTPAPI_CloneOption(OPTION_TRUSTED_CERTS, TEST_CERTIFICATE_VALUE, NULL);
+    bool trace = false;
+    HTTPAPI_RESULT http_result = HTTPAPI_CloneOption(OPTION_LOG_TRACE, &trace, NULL);
 
     //assert
     ASSERT_ARE_EQUAL(HTTPAPI_RESULT, HTTPAPI_INVALID_ARG, http_result);
@@ -1445,44 +1395,7 @@ TEST_FUNCTION(httpapi_cloneoption_savedvalue_NULL_fail)
     // Cleanup
 }
 
-TEST_FUNCTION(httpapi_cloneoption_trusted_cert_alloc_fail)
-{
-    //arrange
-    EXPECTED_CALL(gballoc_malloc(IGNORED_NUM_ARG));
-
-    g_fail_alloc_calls = 1;
-
-    //act
-    char* cert = NULL;
-    HTTPAPI_RESULT http_result = HTTPAPI_CloneOption(OPTION_TRUSTED_CERTS, TEST_CERTIFICATE_VALUE, (const void**)&cert);
-
-    //assert
-    ASSERT_ARE_EQUAL(HTTPAPI_RESULT, HTTPAPI_ALLOC_FAILED, http_result);
-    ASSERT_IS_NULL(cert);
-    ASSERT_ARE_EQUAL(char_ptr, umock_c_get_expected_calls(), umock_c_get_actual_calls());
-
-    // Cleanup
-}
-
-TEST_FUNCTION(httpapi_cloneoption_trusted_cert_succeed)
-{
-    //arrange
-    EXPECTED_CALL(gballoc_malloc(IGNORED_NUM_ARG));
-
-    //act
-    char* cert;
-    HTTPAPI_RESULT http_result = HTTPAPI_CloneOption(OPTION_TRUSTED_CERTS, TEST_CERTIFICATE_VALUE, (const void**)&cert);
-
-    //assert
-    ASSERT_ARE_EQUAL(HTTPAPI_RESULT, HTTPAPI_OK, http_result);
-    ASSERT_IS_NOT_NULL(cert);
-    ASSERT_ARE_EQUAL(char_ptr, TEST_CERTIFICATE_VALUE, cert);
-    ASSERT_ARE_EQUAL(char_ptr, umock_c_get_expected_calls(), umock_c_get_actual_calls());
-
-    // Cleanup
-    free(cert);
-}
-
+/* Tests_SRS_HTTPAPI_07_032: [If any allocation error are encounted HTTPAPI_CloneOption shall return HTTPAPI_ALLOC_FAILED.] */
 TEST_FUNCTION(httpapi_cloneoption_logtrace_alloc_fail)
 {
     //arrange
@@ -1504,6 +1417,7 @@ TEST_FUNCTION(httpapi_cloneoption_logtrace_alloc_fail)
     free(savedValue);
 }
 
+/* Tests_SRS_HTTPAPI_07_020: [HTTPAPI_CloneOption shall clone the specified optionName value into the savedValue parameter.] */
 TEST_FUNCTION(httpapi_cloneoption_logtrace_succeed)
 {
     //arrange
@@ -1523,6 +1437,7 @@ TEST_FUNCTION(httpapi_cloneoption_logtrace_succeed)
     free(savedValue);
 }
 
+/* Tests_SRS_HTTPAPI_07_033: [If a specified option recieved an unsuspected NULL value HTTPAPI_CloneOption shall return HTTPAPI_INVALID_ARG.] */
 TEST_FUNCTION(httpapi_cloneoption_unknown_options_fail)
 {
     //arrange

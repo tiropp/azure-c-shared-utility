@@ -203,9 +203,10 @@ void HTTPAPI_Deinit(void)
     WSACleanup();
 }
 
-HTTP_HANDLE HTTPAPI_CreateConnection(XIO_HANDLE xio, const char* hostName)
+HTTP_HANDLE HTTPAPI_CreateConnection(XIO_HANDLE xio, const char* hostName, int port)
 {
     (void)xio;
+    (void)port;
     LogInfo("HTTPAPI_CreateConnection::Start");
     HTTP_HANDLE_DATA* handle = NULL;
 

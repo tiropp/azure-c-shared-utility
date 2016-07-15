@@ -28,8 +28,6 @@ extern "C" {
 
 typedef struct HTTP_HANDLE_DATA_TAG* HTTP_HANDLE;
 
-#define AMBIGUOUS_STATUS_CODE           (300)
-
 #define HTTPAPI_RESULT_VALUES                \
 HTTPAPI_OK,                                  \
 HTTPAPI_INVALID_ARG,                         \
@@ -40,10 +38,10 @@ HTTPAPI_SET_X509_FAILURE,                    \
 HTTPAPI_SET_TIMEOUTS_FAILED,                 \
 HTTPAPI_SEND_REQUEST_FAILED,                 \
 HTTPAPI_ALLOC_FAILED,                        \
-HTTPAPI_STRING_PROCESSING_ERROR,             \
+HTTPAPI_REQUEST_LINE_PROCESSING_ERROR,       \
 HTTPAPI_HTTP_HEADERS_FAILED,                 \
-HTTPAPI,                 \
 HTTPAPI_OPEN_REQUEST_FAILED,                 \
+HTTPAPI_STRING_PROCESSING_ERROR,             \
 HTTPAPI_RECEIVE_RESPONSE_FAILED,             \
 HTTPAPI_QUERY_HEADERS_FAILED,                \
 HTTPAPI_QUERY_DATA_AVAILABLE_FAILED,         \
@@ -73,20 +71,6 @@ DEFINE_ENUM(HTTPAPI_RESULT, HTTPAPI_RESULT_VALUES);
 DEFINE_ENUM(HTTPAPI_REQUEST_TYPE, HTTPAPI_REQUEST_TYPE_VALUES);
 
 typedef void(*ON_EXECUTE_COMPLETE)(void* callback_context, HTTPAPI_RESULT execute_result, unsigned int statusCode, HTTP_HEADERS_HANDLE respHeader, CONSTBUFFER_HANDLE responseBuffer);
-
-/**
- * @brief	Global initialization for the HTTP API component.
- *
- *			Platform specific implementations are expected to initialize
- *			the underlying HTTP API stacks.
- * 
- * @return	@c HTTPAPI_OK if initialization is successful or an error
- * 			code in case it fails.
- */
-MOCKABLE_FUNCTION(, HTTPAPI_RESULT, HTTPAPI_Init);
-
-/** @brief	Free resources allocated in ::HTTPAPI_Init. */
-MOCKABLE_FUNCTION(, void, HTTPAPI_Deinit);
 
 /**
  * @brief	Creates an HTTPS connection to the host specified by the @p

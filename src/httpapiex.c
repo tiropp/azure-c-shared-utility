@@ -373,14 +373,7 @@ HTTPAPIEX_RESULT HTTPAPIEX_ExecuteRequest(HTTPAPIEX_HANDLE handle, HTTPAPI_REQUE
                         {
                         case 0:
                         {
-                            if (HTTPAPI_Init() != HTTPAPI_OK)
-                            {
-                                goOn = false;
-                            }
-                            else
-                            {
-                                goOn = true;
-                            }
+                            goOn = true;
                             break;
                         }
                         case 1:
@@ -451,7 +444,6 @@ HTTPAPIEX_RESULT HTTPAPIEX_ExecuteRequest(HTTPAPIEX_HANDLE handle, HTTPAPI_REQUE
                         {
                         case 0:
                         {
-                            HTTPAPI_Deinit();
                             break;
                         }
                         case 1:
@@ -511,7 +503,6 @@ void HTTPAPIEX_Destroy(HTTPAPIEX_HANDLE handle)
         if (handleData->k == 2)
         {
             HTTPAPI_CloseConnection(handleData->httpHandle);
-            HTTPAPI_Deinit();
         }
         STRING_delete(handleData->hostName);
 
