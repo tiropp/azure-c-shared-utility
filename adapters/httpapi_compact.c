@@ -7,7 +7,6 @@
 #endif
 
 #include <stdio.h>
-#include <stdlib.h>
 #include <ctype.h>
 #include <stdbool.h>
 #include "azure_c_shared_utility/gballoc.h"
@@ -88,7 +87,7 @@ static void getLogTime(char* timeResult, size_t len)
     }
 }
 
-static int ProcessStatusCodeLine(const unsigned char* buffer, size_t len, size_t* position, int* statusLen)
+static int process_status_line(HTTP_RECV_DATA* recv_data, size_t* position)
 {
     int result = __LINE__;
     size_t index;
@@ -96,25 +95,34 @@ static int ProcessStatusCodeLine(const unsigned char* buffer, size_t len, size_t
     const char* initSpace = NULL;
     char statusCode[4];
 
-    for (index = 0; index < len; index++)
+    for (index = 0; index < recv_data->storedLen; index++)
     {
-        if (buffer[index] == ' ')
+        if (recv_data->storedBytes[index] == ' ')
         {
             if (spaceFound == 1)
             {
-                strncpy(statusCode, initSpace, 3);
-                statusCode[3] = '\0';
+                if (strncpy(statusCode, initSpace, 3) == NULL)
+                {
+                    LogError("Failure copying statuc code .");
+                    recv_data->recvState = state_error;
+                    result = __LINE__;
+                    break;
+                }
+                else
+                {
+                    statusCode[3] = '\0';
+                }
             }
             else
             {
-                initSpace = (const char*)buffer+index+1;
+                initSpace = (const char*)recv_data->storedBytes+index+1;
             }
             spaceFound++;
         }
-        else if (buffer[index] == '\n')
+        else if (recv_data->storedBytes[index] == '\n')
         {
-            *statusLen = (int)atol(statusCode);
-            if (index < len)
+            recv_data->statusCode = (int)atol(statusCode);
+            if (index < recv_data->storedLen)
             {
                 *position = index+1;
             }
@@ -129,75 +137,87 @@ static int ProcessStatusCodeLine(const unsigned char* buffer, size_t len, size_t
     return result;
 }
 
-static int ProcessHeaderLine(const unsigned char* buffer, size_t len, size_t* position, HTTP_HEADERS_HANDLE respHeader, size_t* contentLen, bool* isChunked)
+static int process_header_line(HTTP_RECV_DATA* recv_data, size_t* position)
 {
     int result = __LINE__;
     size_t index;
-    const unsigned char* targetPos = buffer;
+    const unsigned char* targetPos = recv_data->storedBytes;
     bool crlfEncounted = false;
     bool colonEncountered = false;
     char* headerKey = NULL;
     bool continueProcessing = true;
 
-    for (index = 0; index < len && continueProcessing; index++)
+    for (index = 0; index < recv_data->storedLen && continueProcessing; index++)
     {
-        if (buffer[index] == ':' && !colonEncountered)
+        if (recv_data->storedBytes[index] == ':' && !colonEncountered)
         {
             colonEncountered = true;
-            size_t keyLen = (&buffer[index])-targetPos;
+            size_t keyLen = (&recv_data->storedBytes[index])-targetPos;
             headerKey = (char*)malloc(keyLen+1);
             if (headerKey == NULL)
             {
-
+                LogError("Failure allocating header memory");
+                recv_data->recvState = state_error;
+                result = __LINE__;
             }
-            memcpy(headerKey, targetPos, keyLen);
-            headerKey[keyLen] = '\0';
+            else
+            {
+                memcpy(headerKey, targetPos, keyLen);
+                headerKey[keyLen] = '\0';
 
-            targetPos = buffer+index+1;
-            crlfEncounted = false;
+                targetPos = recv_data->storedBytes+index+1;
+                crlfEncounted = false;
+            }
         }
-        else if (buffer[index] == '\r')
+        else if (recv_data->storedBytes[index] == '\r')
         {
             if (headerKey != NULL)
             {
                 // Remove leading spaces
                 while (*targetPos == 32) { targetPos++; }
 
-                size_t valueLen = (&buffer[index])-targetPos;
+                size_t valueLen = (&recv_data->storedBytes[index])-targetPos;
                 char* headerValue = (char*)malloc(valueLen+1);
                 if (headerValue == NULL)
                 {
-
-                }
-                memcpy(headerValue, targetPos, valueLen);
-                headerValue[valueLen] = '\0';
-
-                if (HTTPHeaders_AddHeaderNameValuePair(respHeader, headerKey, headerValue) != HTTP_HEADERS_OK)
-                {
+                    LogError("Failure allocating header memory");
+                    recv_data->recvState = state_error;
                     result = __LINE__;
-                    continueProcessing = false;
                 }
                 else
                 {
-                    if (strcmp(headerKey, HTTP_CONTENT_LEN) == 0)
+                    memcpy(headerValue, targetPos, valueLen);
+                    headerValue[valueLen] = '\0';
+
+                    if (HTTPHeaders_AddHeaderNameValuePair(recv_data->respHeader, headerKey, headerValue) != HTTP_HEADERS_OK)
                     {
-                        *isChunked = false;
-                        *contentLen = atol(headerValue);
+                        LogError("Failure adding header value");
+                        result = __LINE__;
+                        continueProcessing = false;
+                        recv_data->recvState = state_error;
                     }
-                    else if (strcmp(headerKey, "Transfer-Encoding") == 0)
+                    else
                     {
-                        *isChunked = true;
-                        *contentLen = 0;
+                        if (strcmp(headerKey, HTTP_CONTENT_LEN) == 0)
+                        {
+                            recv_data->chunkedReply = false;
+                            recv_data->totalBodyLen = atol(headerValue);
+                        }
+                        else if (strcmp(headerKey, "Transfer-Encoding") == 0)
+                        {
+                            recv_data->chunkedReply = true;
+                            recv_data->totalBodyLen = 0;
+                        }
                     }
+                    free(headerKey);
+                    headerKey = NULL;
+                    free(headerValue);
                 }
-                free(headerKey);
-                headerKey = NULL;
-                free(headerValue);
             }
         }
-        else if (buffer[index] == '\n')
+        else if (recv_data->storedBytes[index] == '\n')
         {
-            if (index < len)
+            if (index < recv_data->storedLen)
             {
                 *position = index+1;
             }
@@ -214,7 +234,7 @@ static int ProcessHeaderLine(const unsigned char* buffer, size_t len, size_t* po
             {
                 colonEncountered = false;
                 crlfEncounted = true;
-                targetPos = buffer+index+1;
+                targetPos = recv_data->storedBytes+index+1;
             }
         }
         else
@@ -229,7 +249,7 @@ static int ProcessHeaderLine(const unsigned char* buffer, size_t len, size_t* po
     return result;
 }
 
-static int ConvertCharToHex(const unsigned char* hexText, size_t len)
+static int convert_char_to_hex(const unsigned char* hexText, size_t len)
 {
     int result = 0;
     for (size_t index = 0; index < len; index++)
@@ -295,14 +315,20 @@ static void on_bytes_recv(void* context, const unsigned char* buffer, size_t len
             }
             http_data->recvMsg.chunkedReply = false;
 
-            char timeResult[TIME_MAX_BUFFER];
-            getLogTime(timeResult, TIME_MAX_BUFFER);
-            LOG(LOG_TRACE, 0, "<- %s\r\n", timeResult);
+            if (http_data->logTrace)
+            {
+                char timeResult[TIME_MAX_BUFFER];
+                getLogTime(timeResult, TIME_MAX_BUFFER);
+                LOG(LOG_TRACE, 0, "<- %s\r\n", timeResult);
+            }
         }
 
-        for (size_t testindex = 0; testindex < len; testindex++)
+        if (http_data->logTrace)
         {
-            LOG(LOG_TRACE, 0, "%c", buffer[testindex]);
+            for (size_t testindex = 0; testindex < len; testindex++)
+            {
+                LOG(LOG_TRACE, 0, "%c", buffer[testindex]);
+            }
         }
 
         if (http_data->recvMsg.storedLen == 0)
@@ -336,7 +362,7 @@ static void on_bytes_recv(void* context, const unsigned char* buffer, size_t len
         if (http_data->recvMsg.recvState == state_initial)
         {
             index = 0;
-            int lineComplete = ProcessStatusCodeLine(http_data->recvMsg.storedBytes, http_data->recvMsg.storedLen, &index, &http_data->recvMsg.statusCode);
+            int lineComplete = process_status_line(&http_data->recvMsg, &index);
             if (lineComplete == 0 && http_data->recvMsg.statusCode > 0)
             {
                 http_data->recvMsg.recvState = state_status_line;
@@ -354,7 +380,7 @@ static void on_bytes_recv(void* context, const unsigned char* buffer, size_t len
         {
             // Gather the Header
             index = 0;
-            int headerComplete = ProcessHeaderLine(http_data->recvMsg.storedBytes, http_data->recvMsg.storedLen, &index, http_data->recvMsg.respHeader, &http_data->recvMsg.totalBodyLen, &http_data->recvMsg.chunkedReply);
+            int headerComplete = process_header_line(&http_data->recvMsg, &index);
             if (headerComplete == 0)
             {
                 if (http_data->recvMsg.totalBodyLen == 0)
@@ -414,7 +440,8 @@ static void on_bytes_recv(void* context, const unsigned char* buffer, size_t len
                     CONSTBUFFER_HANDLE response = CONSTBUFFER_CreateFromBuffer(http_data->recvMsg.msgBody);
                     if (response == NULL)
                     {
-                        // DO some error here
+                        http_data->recvMsg.recvState = state_error;
+                        parseSuccess = false;
                     }
                     else
                     {
@@ -449,7 +476,7 @@ static void on_bytes_recv(void* context, const unsigned char* buffer, size_t len
                 if (*iterator == '\r')
                 {
                     size_t hexLen = iterator-targetPos;
-                    chunkLen = ConvertCharToHex(targetPos, hexLen);
+                    chunkLen = convert_char_to_hex(targetPos, hexLen);
                     if (chunkLen == 0)
                     {
                         //if (http_data->fnChunkReplyCallback != NULL)
@@ -906,6 +933,8 @@ HTTP_HANDLE HTTPAPI_CreateConnection(XIO_HANDLE xio, const char* hostName, int p
                 memset(&http_data->recvMsg, 0, sizeof(HTTP_RECV_DATA) );
                 http_data->recvMsg.recvState = state_complete;
                 http_data->recvMsg.chunkedReply = false;
+                http_data->logTrace = false;
+
             }
         }
     }
