@@ -20,7 +20,6 @@
 #include "azure_c_shared_utility/constbuffer.h"
 
 #define MAX_HOSTNAME_LEN        65
-#define TEMP_BUFFER_SIZE        4096
 #define TIME_MAX_BUFFER         16
 #define HTTP_SECURE_PORT        443
 #define HTTP_DEFAULT_PORT       80
@@ -147,6 +146,10 @@ static int ProcessHeaderLine(const unsigned char* buffer, size_t len, size_t* po
             colonEncountered = true;
             size_t keyLen = (&buffer[index])-targetPos;
             headerKey = (char*)malloc(keyLen+1);
+            if (headerKey == NULL)
+            {
+
+            }
             memcpy(headerKey, targetPos, keyLen);
             headerKey[keyLen] = '\0';
 
@@ -162,6 +165,10 @@ static int ProcessHeaderLine(const unsigned char* buffer, size_t len, size_t* po
 
                 size_t valueLen = (&buffer[index])-targetPos;
                 char* headerValue = (char*)malloc(valueLen+1);
+                if (headerValue == NULL)
+                {
+
+                }
                 memcpy(headerValue, targetPos, valueLen);
                 headerValue[valueLen] = '\0';
 
@@ -269,6 +276,7 @@ static void on_io_open_complete(void* context, IO_OPEN_RESULT open_result)
 
 static void on_bytes_recv(void* context, const unsigned char* buffer, size_t len)
 {
+    (void)context;
     HTTP_HANDLE_DATA* http_data = (HTTP_HANDLE_DATA*)context;
     size_t index = 0;
     HTTPAPI_RESULT execute_result;
@@ -286,6 +294,15 @@ static void on_bytes_recv(void* context, const unsigned char* buffer, size_t len
                 http_data->recvMsg.msgBody = BUFFER_new();
             }
             http_data->recvMsg.chunkedReply = false;
+
+            char timeResult[TIME_MAX_BUFFER];
+            getLogTime(timeResult, TIME_MAX_BUFFER);
+            LOG(LOG_TRACE, 0, "<- %s\r\n", timeResult);
+        }
+
+        for (size_t testindex = 0; testindex < len; testindex++)
+        {
+            LOG(LOG_TRACE, 0, "%c", buffer[testindex]);
         }
 
         if (http_data->recvMsg.storedLen == 0)
@@ -417,7 +434,7 @@ static void on_bytes_recv(void* context, const unsigned char* buffer, size_t len
                 }*/
             }
         }
-        if (http_data->recvMsg.recvState == state_message_chunked)
+        /*if (http_data->recvMsg.recvState == state_message_chunked)
         {
             // Chunked reply
             bool crlfEncounted = false;
@@ -435,12 +452,12 @@ static void on_bytes_recv(void* context, const unsigned char* buffer, size_t len
                     chunkLen = ConvertCharToHex(targetPos, hexLen);
                     if (chunkLen == 0)
                     {
-                        /*if (http_data->fnChunkReplyCallback != NULL)
-                        {
-                            http_data->fnChunkReplyCallback((HTTP_HANDLE)data, http_data->userCtx, NULL, 0, http_data->recvMsg.statusCode, http_data->recvMsg.respHeader, true);
-                            http_data->recvMsg.recvState = state_message_body;
-                            break;
-                        }*/
+                        //if (http_data->fnChunkReplyCallback != NULL)
+                        //{
+                            //http_data->fnChunkReplyCallback((HTTP_HANDLE)data, http_data->userCtx, NULL, 0, http_data->recvMsg.statusCode, http_data->recvMsg.respHeader, true);
+                            //http_data->recvMsg.recvState = state_message_body;
+                            //break;
+                        //}
                     }
                     else if (chunkLen <= http_data->recvMsg.storedLen-index)
                     {
@@ -451,13 +468,13 @@ static void on_bytes_recv(void* context, const unsigned char* buffer, size_t len
                         }
                         else
                         {
-                            /*if (http_data->fnChunkReplyCallback != NULL)
-                            {
-                                http_data->fnChunkReplyCallback((HTTP_CLIENT_HANDLE)data, http_data->userCtx, BUFFER_u_char(http_data->recvMsg.msgBody), BUFFER_length(http_data->recvMsg.msgBody), http_data->recvMsg.statusCode, http_data->recvMsg.respHeader, false);
-                            }*/
-                            index += chunkLen+2;
-                            if (chunkLen != http_data->recvMsg.storedLen-index)
-                            {
+                            //if (http_data->fnChunkReplyCallback != NULL)
+                            //{
+                            //    http_data->fnChunkReplyCallback((HTTP_CLIENT_HANDLE)data, http_data->userCtx, BUFFER_u_char(http_data->recvMsg.msgBody), BUFFER_length(http_data->recvMsg.msgBody), http_data->recvMsg.statusCode, http_data->recvMsg.respHeader, false);
+                            //}
+                            //index += chunkLen+2;
+                            //if (chunkLen != http_data->recvMsg.storedLen-index)
+                            //{
                                 // Let's remove the unneccessary bytes
                                 size_t allocLen = http_data->recvMsg.storedLen-chunkLen;
                                 unsigned char* tmpBuff = (unsigned char*)malloc(allocLen);
@@ -483,7 +500,7 @@ static void on_bytes_recv(void* context, const unsigned char* buffer, size_t len
                     }
                 }
             }
-        }
+        }*/
         if (http_data->recvMsg.recvState == state_message_body || http_data->recvMsg.recvState == state_error)
         {
             HTTPHeaders_Free(http_data->recvMsg.respHeader);
