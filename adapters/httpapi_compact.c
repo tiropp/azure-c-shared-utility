@@ -50,6 +50,7 @@ typedef enum RESPONSE_MESSAGE_STATE_TAG
 typedef struct HTTP_RECV_DATA_TAG
 {
     int statusCode;
+    HTTPAPI_REQUEST_TYPE requestType;
     RESPONSE_MESSAGE_STATE recvState;
     HTTP_HEADERS_HANDLE respHeader;
     BUFFER_HANDLE msgBody;
@@ -528,7 +529,9 @@ static void on_bytes_recv(void* context, const unsigned char* buffer, size_t len
                 }
             }
         }*/
-        if (http_data->recvMsg.recvState == state_message_body || http_data->recvMsg.recvState == state_error)
+        if ( (http_data->recvMsg.requestType = HTTPAPI_REQUEST_HEAD && http_data->recvMsg.recvState == state_response_header) || 
+            (http_data->recvMsg.recvState == state_message_body) || 
+            (http_data->recvMsg.recvState == state_error) )
         {
             HTTPHeaders_Free(http_data->recvMsg.respHeader);
             http_data->recvMsg.respHeader = NULL;
@@ -1007,6 +1010,7 @@ HTTPAPI_RESULT HTTPAPI_ExecuteRequestAsync(HTTP_HANDLE handle, HTTPAPI_REQUEST_T
         http_data->recvMsg.recvState = state_initial;
         http_data->recvMsg.fn_execute_complete = on_execute_complete;
         http_data->recvMsg.execute_ctx = callback_context;
+        http_data->recvMsg.requestType = requestType;
         result = send_http_data(http_data, requestType, relativePath, httpHeadersHandle, contentLength, false);
         if (result == HTTPAPI_OK)
         {
