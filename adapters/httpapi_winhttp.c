@@ -384,7 +384,7 @@ HTTPAPI_RESULT HTTPAPI_ExecuteRequest(HTTP_HANDLE handle, HTTPAPI_REQUEST_TYPE r
                                     }
                                     else
                                     {
-                                        if ((handleData->x509SchannelHandle!=NULL) &&
+                                        if ((handleData->x509SchannelHandle!=NULL) && 
                                             !WinHttpSetOption(
                                                 requestHandle,
                                                 WINHTTP_OPTION_CLIENT_CERT_CONTEXT,

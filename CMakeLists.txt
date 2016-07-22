@@ -21,9 +21,22 @@ endif()
 include (CTest)
 
 if(MSVC)
-  set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} /W4")
-  set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} /W4")
+    if (WINCE) # Be lax with WEC 2013 compiler
+        set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} /W3")
+        set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} /W3")
+        # WEC 2013 uses older VS compiler. Build some files as C++ files to resolve C99 related compile issues
+        SET_SOURCE_FILES_PROPERTIES(src/consolelogger.c src/xlogging.c src/map.c adapters/uniqueid_win32.c adapters/httpapi_wince.c src/tlsio_schannel.c src/x509_schannel.c PROPERTIES LANGUAGE CXX)
+        add_definitions(-DWIN32) #WEC 2013 
+    ELSE()
+        set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} /W4")
+        set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} /W4")
+  
+    endif()
+elseif(LINUX)
+  set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Werror")
+  set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -Werror")
 endif()
+
 
 #these are the include folders
 #the following "set" statetement exports across the project a global variable called COMMON_INC_FOLDER that expands to whatever needs to included when using COMMON library
@@ -32,6 +45,10 @@ set(SHARED_UTIL_SRC_FOLDER ${CMAKE_CURRENT_LIST_DIR}/src CACHE INTERNAL "this is
 set(SHARED_UTIL_ADAPTER_FOLDER "${CMAKE_CURRENT_LIST_DIR}/adapters" CACHE INTERNAL "this is where the adapters live" FORCE)
 
 include_directories(${SHARED_UTIL_INC_FOLDER})
+if (WINCE)
+include_directories(${SHARED_UTIL_INC_FOLDER}/azure_c_shared_utility/windowsce) #windowsce SDK doesn't have stdbool.h
+ENDIF()
+
 
 #the following variables are project-wide and can be used with cmake-gui
 option(skip_unittests "set skip_unittests to ON to skip unittests (default is OFF)[if possible, they are always build]" OFF)
@@ -53,7 +70,6 @@ option(compileOption_C "passes a string to the command line of the C compiler" O
 option(compileOption_CXX "passes a string to the command line of the C++ compiler" OFF)
 
 # Start of variables used during install
-set (INCLUDE_INSTALL_DIR "/usr/include/azureiot/azure_c_shared_utility" CACHE PATH "Include file directory")
 set (LIB_INSTALL_DIR lib CACHE PATH "Library object file directory")
 
 #Use solution folders. 
@@ -194,7 +210,7 @@ function(linux_unittests_add_exe whatIsBuilding)
     target_include_directories(${whatIsBuilding}_exe PUBLIC ${sharedutil_include_directories})
     
     #this part detects 
-        #       - the additional libraries that might be needed.
+    #   - the additional libraries that might be needed.
     #     additional libraries are started by ADDITIONAL_LIBS parameter and ended by any other known parameter (or end of variable arguments)
     #   - a valgring suppression file (VALGRIND_SUPRESSIONS_FILE) for memcheck
     #     the file name follows immediately after 
@@ -468,7 +484,7 @@ function(set_platform_files)
         set(THREAD_C_FILE ${CMAKE_CURRENT_LIST_DIR}/adapters/threadapi_win32.c PARENT_SCOPE)
         set(LOCK_C_FILE ${CMAKE_CURRENT_LIST_DIR}/adapters/lock_win32.c PARENT_SCOPE)
         if (WINCE)
-            set(HTTP_C_FILE ${CMAKE_CURRENT_LIST_DIR}/adapters/httpapi_wince.cpp PARENT_SCOPE)
+            set(HTTP_C_FILE ${CMAKE_CURRENT_LIST_DIR}/adapters/httpapi_wince.c PARENT_SCOPE)
         else()
             set(HTTP_C_FILE ${CMAKE_CURRENT_LIST_DIR}/adapters/httpapi_compact.c PARENT_SCOPE)
         endif()
@@ -532,6 +548,7 @@ set(source_c_files
 ./src/usha.c
 ./src/vector.c
 ./src/xlogging.c
+./src/optionhandler.c
 ./adapters/agenttime.c
 ${CONDITION_C_FILE}
 ${LOCK_C_FILE}
@@ -565,6 +582,7 @@ endif()
 if(${use_openssl})
     set(source_c_files ${source_c_files}
         ./src/tlsio_openssl.c
+        ./src/x509_openssl.c
     )
 endif()
 
@@ -606,7 +624,7 @@ set(source_h_files
 ./inc/azure_c_shared_utility/xlogging.h
 ./inc/azure_c_shared_utility/constbuffer.h
 ./inc/azure_c_shared_utility/tlsio.h
-./inc/azure_c_shared_utility/x509_schannel.h
+./inc/azure_c_shared_utility/optionhandler.h
 )
 
 if(${use_http})
@@ -621,7 +639,8 @@ endif()
 if(${use_schannel})
     set(source_h_files ${source_h_files}
         ./inc/azure_c_shared_utility/tlsio_schannel.h
-    )
+        ./inc/azure_c_shared_utility/x509_schannel.h
+        )
 endif()
 if(${use_wolfssl})
     set(source_h_files ${source_h_files}
@@ -634,6 +653,7 @@ endif()
 if(${use_openssl})
     set(source_h_files ${source_h_files}
         ./inc/azure_c_shared_utility/tlsio_openssl.h
+	./inc/azure_c_shared_utility/x509_openssl.h
     )
     if(WIN32)
         include_directories($ENV{OpenSSLDir}/include)
@@ -653,8 +673,13 @@ endif()
 IF(WIN32)
     #windows needs this define
     add_definitions(-D_CRT_SECURE_NO_WARNINGS)
-    # Make warning as error
+	IF(WINCE)
+	# Don't treat warning as errors for WEC 2013. WEC 2013 uses older compiler version 
+	add_definitions(/WX-)
+	ELSE()
+	# Make warning as error
     add_definitions(/WX)
+	ENDIF()
 ELSE()
     # Make warning as error
     set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Werror")
@@ -676,7 +701,11 @@ if(${use_http})
 endif()
 
 if(${use_schannel})
-    target_link_libraries(aziotsharedutil ws2_32 secur32)
+    if (WINCE)
+        target_link_libraries(aziotsharedutil secur32)
+    else()
+		target_link_libraries(aziotsharedutil ws2_32 secur32)
+	endif()
 endif()
 
 if(${use_openssl})
@@ -699,6 +728,6 @@ endif()
 if(WIN32)
 else()
     install (TARGETS aziotsharedutil DESTINATION lib)
-    install (FILES ${source_h_files} DESTINATION ${INCLUDE_INSTALL_DIR})
+    install (FILES ${source_h_files} DESTINATION include/azureiot/azure_c_shared_utility)
 endif (WIN32)
 
