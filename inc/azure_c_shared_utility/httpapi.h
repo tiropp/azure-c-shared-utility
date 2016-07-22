@@ -26,6 +26,9 @@ extern "C" {
 #include <stddef.h>
 #endif
 
+#define DEFAULT_HTTP_PORT               80
+#define DEFAULT_HTTP_SECURE_PORT        443
+
 typedef struct HTTP_HANDLE_DATA_TAG* HTTP_HANDLE;
 
 #define HTTPAPI_RESULT_VALUES                \
@@ -63,6 +66,7 @@ DEFINE_ENUM(HTTPAPI_RESULT, HTTPAPI_RESULT_VALUES);
     HTTPAPI_REQUEST_DELETE,         \
     HTTPAPI_REQUEST_CONNECT,        \
     HTTPAPI_REQUEST_OPTIONS,        \
+    HTTPAPI_REQUEST_PATCH,          \
     HTTPAPI_REQUEST_TRACE           \
 
 /** @brief Enumeration specifying the HTTP request verbs accepted by

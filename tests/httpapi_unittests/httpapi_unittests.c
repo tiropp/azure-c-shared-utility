@@ -5,44 +5,30 @@
 #ifdef _CRTDBG_MAP_ALLOC
 #include <crtdbg.h>
 #endif
+
 #include <stddef.h>
+
+static const char* TEST_HOSTNAME = "www.hostname.com";
+
+static void* my_gballoc_malloc(size_t size)
+{
+    return malloc(size);
+}
+
+static void my_gballoc_free(void* ptr)
+{
+    free(ptr);
+}
 
 #include "testrunnerswitcher.h"
 #include "umock_c.h"
+
 #include "umocktypes_bool.h"
 #include "umocktypes_stdint.h"
-
-static size_t g_current_alloc_calls;
-static size_t g_fail_alloc_calls;
-static const char* TEST_HOSTNAME = "www.hostname.com";
-
-void* my_gballoc_malloc(size_t size)
-{
-    void* alloc_result;
-    g_current_alloc_calls++;
-    if (g_fail_alloc_calls != 0 && g_current_alloc_calls >= g_fail_alloc_calls)
-    {
-        alloc_result = NULL;
-    }
-    else
-    {
-        alloc_result = malloc(size);
-    }
-    return alloc_result;
-}
-
-void my_gballoc_free(void* ptr)
-{
-    if (ptr != TEST_HOSTNAME)
-    {
-        free(ptr);
-    }
-}
+#include "umock_c_negative_tests.h"
 
 #define ENABLE_MOCKS
 
-//#include "umock_c_prod.h"
-//#include "umock_c.h"
 #include "azure_c_shared_utility/crt_abstractions.h"
 #include "azure_c_shared_utility/httpheaders.h"
 #include "azure_c_shared_utility/buffer_.h"
@@ -52,6 +38,27 @@ void my_gballoc_free(void* ptr)
 #include "azure_c_shared_utility/constbuffer.h"
 
 #undef ENABLE_MOCKS
+
+static BUFFER_HANDLE my_BUFFER_new(void)
+{
+    return (BUFFER_HANDLE)my_gballoc_malloc(1);
+}
+
+static void my_BUFFER_delete(BUFFER_HANDLE handle)
+{
+    my_gballoc_free(handle);
+}
+
+static STRING_HANDLE my_STRING_construct(const char* psz)
+{
+    (void)psz;
+    return (STRING_HANDLE)my_gballoc_malloc(1);
+}
+
+static void my_STRING_delete(STRING_HANDLE handle)
+{
+    my_gballoc_free(handle);
+}
 
 #include "azure_c_shared_utility/httpapi.h"
 
@@ -64,21 +71,19 @@ static size_t TEST_BUFFER_SIZE = 12;
 static const CONSTBUFFER_HANDLE TEST_CONSTBUFFER_VALUE = (CONSTBUFFER_HANDLE)0x13;
 static const HTTP_HEADERS_HANDLE TEST_HEADER_HANDLE = (HTTP_HEADERS_HANDLE)0x14;
 
-//ON_PACKET_COMPLETE_CALLBACK g_packetComplete;
-ON_IO_OPEN_COMPLETE g_openComplete;
-ON_BYTES_RECEIVED g_bytesRecv;
-ON_IO_ERROR g_ioError;
-ON_SEND_COMPLETE g_sendComplete;
-void* g_onCompleteCtx;
-void* g_onSendCtx;
-void* g_bytesRecvCtx;
-void* g_ioErrorCtx;
+//g_on_bytes_recv
+static ON_IO_OPEN_COMPLETE g_openComplete;
+static ON_BYTES_RECEIVED g_on_bytes_recv;
+static ON_IO_ERROR g_ioError;
+static ON_SEND_COMPLETE g_on_send_complete;
+static void* g_onCompleteCtx;
+static void* g_onSendCtx;
+static void* g_on_bytes_recv_ctx;
+static void* g_ioErrorCtx;
 
-static int g_when_call_to_xio_fail = 0;
-static int g_calls_to_xio_send = 0;
 static TEST_MUTEX_HANDLE test_serialize_mutex;
+static bool g_execute_complete_called = false;
 
-static bool g_string_construct_fails = false;
 static size_t g_header_count = 0;
 static HTTP_HEADERS_RESULT g_header_result = HTTP_HEADERS_OK;
 static HTTP_HEADERS_RESULT g_hdr_result = HTTP_HEADERS_OK;
@@ -91,142 +96,99 @@ static const unsigned char* TEST_HTTP_CONTENT = (const unsigned char*)"grant_typ
 static const char* OPTION_LOG_TRACE = "logtrace";
 static const char* INVALID_OPTION_LOG_TRACE = "invalid_option";
 
-#ifdef __cplusplus
-extern "C" {
-#endif
-    static HTTP_HEADERS_HANDLE my_HTTPHeaders_Alloc(void)
-    {
-        //return (HTTP_HEADERS_HANDLE)my_gballoc_malloc(1);
-        return NULL;
-    }
+static const char* TEST_HTTP_GET_BUFFER = "HTTP/1.1 200 OK\r\nDate: Mon, 27 Jul 2009 12:28:53 GMT\r\nServer: Apache/2.2.14 (Win32)\r\nLast-Modified: Wed, 22 Jul 2009 19:15:56 GMT\r\n \
+Vary: Authorization, Accept\r\nAccept-Ranges: bytes\r\nContent-Length: 58\r\nContent-Type: text/html\r\nConnection: Closed\r\n\r\n<html>\r\n<body>\r\n<h1>Hello, World!</h1>\r\n</body>\r\n</html>\r\n";
+static const char* TEST_HTTP_HEAD_BUFFER = "HTTP/1.1 200 OK\r\nDate: Mon, 27 Jul 2009 12:28:53 GMT\r\nServer: Apache/2.2.14 (Win32)\r\nLast-Modified: Wed, 22 Jul 2009 19:15:56 GMT\r\n \
+Vary: Authorization, Accept\r\nAccept-Ranges: bytes\r\nContent-Length: 88\r\nContent-Type: text/html\r\nConnection: Closed\r\n\r\n";
 
-    static void my_HTTPHeaders_Free(HTTP_HEADERS_HANDLE h)
-    {
-        (void)h;
-        //my_gballoc_free(h);
-    }
+static HTTP_HEADERS_HANDLE my_HTTPHeaders_Alloc(void)
+{
+    return (HTTP_HEADERS_HANDLE)my_gballoc_malloc(1);
+}
 
-    static HTTP_HEADERS_RESULT my_HTTPHeaders_GetHeader(HTTP_HEADERS_HANDLE handle, size_t index, char** destination)
+static void my_HTTPHeaders_Free(HTTP_HEADERS_HANDLE h)
+{
+    my_gballoc_free(h);
+}
+
+static HTTP_HEADERS_RESULT my_HTTPHeaders_GetHeader(HTTP_HEADERS_HANDLE handle, size_t index, char** destination)
+{
+    (void)handle;
+    if (g_hdr_result == HTTP_HEADERS_OK)
     {
-        (void)handle;
-        if (g_hdr_result == HTTP_HEADERS_OK)
+        const char* header_value;
+        switch (index)
         {
-            const char* header_value;
-            switch (index)
-            {
-                case 0:
-                    header_value = "Authorization: SharedAccessSignature sr=iot-sdks-test.azure-devices.net&sig=etg5&se=14";
-                    break;
-                case 1:
-                    header_value = "Accept: application/json";
-                    break;
-                case 2:
-                    header_value = "Host: iot-sdks-test.azure-devices.net";
-                    break;
-                case 3:
-                default:
-                    header_value = "Content-Length: 123";
-                    break;
-            }
-            size_t len = strlen(header_value);
-            *destination = (char*)malloc(len+1);
-            if (*destination != NULL)
-            {
-                strcpy(*destination, header_value);
-                g_hdr_result = HTTP_HEADERS_OK;
-            }
-            else
-            {
-                g_hdr_result = HTTP_HEADERS_ERROR;
-            }
+            case 0:
+                header_value = "Authorization: SharedAccessSignature sr=iot-sdks-test.azure-devices.net&sig=etg5&se=14";
+                break;
+            case 1:
+                header_value = "Accept: application/json";
+                break;
+            case 2:
+                header_value = "Host: iot-sdks-test.azure-devices.net";
+                break;
+            case 3:
+            default:
+                header_value = "Content-Length: 123";
+                break;
         }
-        return g_hdr_result;
-    }
-
-    HTTP_HEADERS_RESULT my_HTTPHeaders_GetHeaderCount(HTTP_HEADERS_HANDLE handle, size_t* headerCount)
-    {
-        (void)handle;
-        *headerCount = g_header_count;
-        return g_header_result;
-    }
-
-    BUFFER_HANDLE my_BUFFER_new(void)
-    {
-        return (BUFFER_HANDLE)malloc(1);
-    }
-
-    void my_BUFFER_delete(BUFFER_HANDLE handle)
-    {
-        free(handle);
-    }
-
-    STRING_HANDLE my_STRING_construct(const char* psz)
-    {
-        (void)psz;
-        STRING_HANDLE rtn_value;
-        if (g_string_construct_fails)
+        size_t len = strlen(header_value);
+        *destination = (char*)my_gballoc_malloc(len+1);
+        if (*destination != NULL)
         {
-            rtn_value = NULL;
+            strcpy(*destination, header_value);
+            g_hdr_result = HTTP_HEADERS_OK;
         }
         else
         {
-            rtn_value = (STRING_HANDLE)malloc(1);
+            g_hdr_result = HTTP_HEADERS_ERROR;
         }
-        return rtn_value;
     }
-
-    void my_STRING_delete(STRING_HANDLE handle)
-    {
-        free(handle);
-    }
-
-    int my_xio_open(XIO_HANDLE handle, ON_IO_OPEN_COMPLETE on_io_open_complete, void* on_io_open_complete_context, ON_BYTES_RECEIVED on_bytes_received, void* on_bytes_received_context, ON_IO_ERROR on_io_error, void* on_io_error_context)
-    {
-        (void)handle;
-        g_openComplete = on_io_open_complete;
-        g_onCompleteCtx = on_io_open_complete_context;
-        g_bytesRecv = on_bytes_received;
-        g_bytesRecvCtx = on_bytes_received_context;
-        g_ioError = on_io_error;
-        g_ioErrorCtx = on_io_error_context;
-        return 0;
-    }
-
-    int my_xio_send(XIO_HANDLE xio, const void* buffer, size_t size, ON_SEND_COMPLETE on_send_complete, void* callback_context)
-    {
-        int send_result = 0;
-        (void)xio;
-        (void)buffer;
-        (void)size;
-        g_sendComplete = on_send_complete;
-        g_onSendCtx = callback_context;
-
-        g_calls_to_xio_send++;
-        if (g_when_call_to_xio_fail > 0 && g_calls_to_xio_send >= g_when_call_to_xio_fail)
-        {
-            send_result = __LINE__;
-        }
-
-        return send_result;
-    }
-
-    int my_mallocAndStrcpy_s(char** destination, const char* source)
-    {
-        (void)source;
-        //size_t l = strlen(source);
-        //*destination = (char*)malloc(l + 1);
-        //strcpy(*destination, source);
-        *destination = (char*)TEST_HOSTNAME;
-        return 0;
-    }
-
-#ifdef __cplusplus
+    return g_hdr_result;
 }
-#endif
+
+static HTTP_HEADERS_RESULT my_HTTPHeaders_GetHeaderCount(HTTP_HEADERS_HANDLE handle, size_t* headerCount)
+{
+    (void)handle;
+    *headerCount = g_header_count;
+    return g_header_result;
+}
+
+static int my_xio_open(XIO_HANDLE handle, ON_IO_OPEN_COMPLETE on_io_open_complete, void* on_io_open_complete_context, ON_BYTES_RECEIVED on_bytes_received, void* on_bytes_received_context, ON_IO_ERROR on_io_error, void* on_io_error_context)
+{
+    (void)handle;
+    g_openComplete = on_io_open_complete;
+    g_onCompleteCtx = on_io_open_complete_context;
+    g_on_bytes_recv = on_bytes_received;
+    g_on_bytes_recv_ctx = on_bytes_received_context;
+    g_ioError = on_io_error;
+    g_ioErrorCtx = on_io_error_context;
+    return 0;
+}
+
+static int my_xio_send(XIO_HANDLE xio, const void* buffer, size_t size, ON_SEND_COMPLETE on_send_complete, void* callback_context)
+{
+    (void)xio;
+    (void)buffer;
+    (void)size;
+    g_on_send_complete = on_send_complete;
+    g_onSendCtx = callback_context;
+    return 0;
+}
+
+static int my_mallocAndStrcpy_s(char** destination, const char* source)
+{
+    (void)source;
+    size_t l = strlen(source);
+    *destination = (char*)my_gballoc_malloc(l + 1);
+    strcpy(*destination, source);
+    return 0;
+}
 
 DEFINE_ENUM_STRINGS(UMOCK_C_ERROR_CODE, UMOCK_C_ERROR_CODE_VALUES)
 
-void on_umock_c_error(UMOCK_C_ERROR_CODE error_code)
+static void on_umock_c_error(UMOCK_C_ERROR_CODE error_code)
 {
     (void)error_code;
     ASSERT_FAIL("umock_c reported error");
@@ -256,38 +218,51 @@ TEST_SUITE_INITIALIZE(suite_init)
     REGISTER_UMOCK_ALIAS_TYPE(ON_IO_ERROR, void*);
     REGISTER_UMOCK_ALIAS_TYPE(CONSTBUFFER_HANDLE, void*);
     REGISTER_UMOCK_ALIAS_TYPE(CONSTBUFFER_HANDLE, void*);
+    REGISTER_UMOCK_ALIAS_TYPE(STRING_HANDLE, void*);
+    REGISTER_UMOCK_ALIAS_TYPE(HTTP_HEADERS_HANDLE, void*);
+    REGISTER_UMOCK_ALIAS_TYPE(ON_IO_CLOSE_COMPLETE, void*);
+    
 
     REGISTER_GLOBAL_MOCK_HOOK(gballoc_malloc, my_gballoc_malloc);
+    REGISTER_GLOBAL_MOCK_FAIL_RETURN(gballoc_malloc, NULL);
     REGISTER_GLOBAL_MOCK_HOOK(gballoc_free, my_gballoc_free);
 
     REGISTER_GLOBAL_MOCK_HOOK(HTTPHeaders_Alloc, my_HTTPHeaders_Alloc);
+    REGISTER_GLOBAL_MOCK_FAIL_RETURN(HTTPHeaders_Alloc, NULL);
     REGISTER_GLOBAL_MOCK_HOOK(HTTPHeaders_Free, my_HTTPHeaders_Free);
     REGISTER_GLOBAL_MOCK_RETURN(HTTPHeaders_AddHeaderNameValuePair, HTTP_HEADERS_OK);
     REGISTER_GLOBAL_MOCK_RETURN(HTTPHeaders_ReplaceHeaderNameValuePair, HTTP_HEADERS_OK);
 
     REGISTER_GLOBAL_MOCK_HOOK(HTTPHeaders_GetHeader, my_HTTPHeaders_GetHeader);
+    REGISTER_GLOBAL_MOCK_FAIL_RETURN(HTTPHeaders_GetHeader, HTTP_HEADERS_ERROR);
     REGISTER_GLOBAL_MOCK_HOOK(HTTPHeaders_GetHeaderCount, my_HTTPHeaders_GetHeaderCount);
 
     REGISTER_GLOBAL_MOCK_HOOK(BUFFER_new, my_BUFFER_new);
+    REGISTER_GLOBAL_MOCK_FAIL_RETURN(BUFFER_new, NULL);
     REGISTER_GLOBAL_MOCK_HOOK(BUFFER_delete, my_BUFFER_delete);
     REGISTER_GLOBAL_MOCK_RETURN(BUFFER_u_char, (unsigned char*)TEST_BUFFER_U_CHAR);
     REGISTER_GLOBAL_MOCK_RETURN(BUFFER_length, TEST_BUFFER_SIZE);
     REGISTER_GLOBAL_MOCK_RETURN(BUFFER_build, 0);
+    REGISTER_GLOBAL_MOCK_FAIL_RETURN(BUFFER_build, __LINE__);
 
     REGISTER_GLOBAL_MOCK_HOOK(xio_open, my_xio_open);
+    REGISTER_GLOBAL_MOCK_FAIL_RETURN(xio_open, __LINE__);
     REGISTER_GLOBAL_MOCK_HOOK(xio_send, my_xio_send);
+    REGISTER_GLOBAL_MOCK_FAIL_RETURN(xio_send, __LINE__);
     REGISTER_GLOBAL_MOCK_RETURN(xio_close, 0);
-    //REGISTER_GLOBAL_MOCK_RETURN(xio_dowork, 0);
 
-    //REGISTER_GLOBAL_MOCK_RETURN(mallocAndStrcpy_s, 0);
     REGISTER_GLOBAL_MOCK_HOOK(mallocAndStrcpy_s, my_mallocAndStrcpy_s);
+    REGISTER_GLOBAL_MOCK_FAIL_RETURN(mallocAndStrcpy_s, __LINE__);
     REGISTER_GLOBAL_MOCK_HOOK(STRING_construct, my_STRING_construct);
+    REGISTER_GLOBAL_MOCK_FAIL_RETURN(STRING_construct, NULL);
+
     REGISTER_GLOBAL_MOCK_HOOK(STRING_delete, my_STRING_delete);
     REGISTER_GLOBAL_MOCK_RETURN(STRING_c_str, TEST_STRING_VALUE);
+    REGISTER_GLOBAL_MOCK_FAIL_RETURN(STRING_c_str, TEST_STRING_VALUE);
     REGISTER_GLOBAL_MOCK_RETURN(STRING_concat, 0);
+    REGISTER_GLOBAL_MOCK_FAIL_RETURN(STRING_concat, __LINE__);
 
-    REGISTER_GLOBAL_MOCK_RETURN(CONSTBUFFER_Create, TEST_CONSTBUFFER_VALUE);
-    //REGISTER_GLOBAL_MOCK_RETURN(BUFFER_build, 0);
+    REGISTER_GLOBAL_MOCK_RETURN(CONSTBUFFER_CreateFromBuffer, TEST_CONSTBUFFER_VALUE);
 }
 
 TEST_SUITE_CLEANUP(suite_cleanup)
@@ -300,29 +275,96 @@ TEST_FUNCTION_INITIALIZE(method_init)
 {
     TEST_MUTEX_ACQUIRE(test_serialize_mutex);
 
-    g_string_construct_fails = false;
     g_openComplete = NULL;
     g_onCompleteCtx = NULL;
-    g_sendComplete = NULL;
+    g_on_send_complete = NULL;
     g_onSendCtx = NULL;
-    g_calls_to_xio_send = 0;
-    g_when_call_to_xio_fail = 0;
-    g_bytesRecv = NULL;
+    g_on_bytes_recv = NULL;
     g_ioError = NULL;
-    g_bytesRecvCtx = NULL;
+    g_on_bytes_recv_ctx = NULL;
     g_ioErrorCtx = NULL;
-    g_fail_alloc_calls = 0;
-    g_current_alloc_calls = 0;
     g_header_count = 0;
     g_header_result = HTTP_HEADERS_OK;
-    g_string_construct_fails = false;
     g_hdr_result = HTTP_HEADERS_OK;
+    g_execute_complete_called = false;
+    umock_c_reset_all_calls();
 }
 
 TEST_FUNCTION_CLEANUP(method_cleanup)
 {
-    umock_c_reset_all_calls();
+    
     TEST_MUTEX_RELEASE(test_serialize_mutex);
+}
+
+static int should_skip_index(size_t current_index, const size_t skip_array[], size_t length)
+{
+    int result = 0;
+    for (size_t index = 0; index < length; index++)
+    {
+        if (current_index == skip_array[index])
+        {
+            result = __LINE__;
+            break;
+        }
+    }
+    return result;
+}
+
+static void setup_httpapi_executerequestasync_mocks()
+{
+    EXPECTED_CALL(gballoc_malloc(IGNORED_NUM_ARG));
+    EXPECTED_CALL(STRING_construct(IGNORED_NUM_ARG));
+    EXPECTED_CALL(gballoc_malloc(IGNORED_NUM_ARG));
+    EXPECTED_CALL(STRING_concat(IGNORED_NUM_ARG, IGNORED_NUM_ARG));
+    EXPECTED_CALL(gballoc_free(IGNORED_PTR_ARG));
+    EXPECTED_CALL(STRING_concat(IGNORED_PTR_ARG, IGNORED_PTR_ARG));
+    EXPECTED_CALL(STRING_c_str(IGNORED_PTR_ARG));
+    STRICT_EXPECTED_CALL(xio_send(TEST_IO_HANDLE, IGNORED_PTR_ARG, IGNORED_NUM_ARG, IGNORED_NUM_ARG, IGNORED_PTR_ARG))
+        .IgnoreArgument(2)
+        .IgnoreArgument(3)
+        .IgnoreArgument(4)
+        .IgnoreArgument(5);
+    EXPECTED_CALL(STRING_delete(IGNORED_PTR_ARG));
+    EXPECTED_CALL(gballoc_free(IGNORED_PTR_ARG));
+}
+
+static void setup_httpapi_executerequestasync_POST_mocks(size_t header_count)
+{
+    EXPECTED_CALL(gballoc_malloc(IGNORED_NUM_ARG));
+    EXPECTED_CALL(STRING_construct(IGNORED_NUM_ARG));
+    EXPECTED_CALL(HTTPHeaders_GetHeaderCount(TEST_HEADER_HANDLE, IGNORED_PTR_ARG));
+
+    for (size_t index = 0; index < header_count; index++)
+    {
+        EXPECTED_CALL(HTTPHeaders_GetHeader(TEST_HEADER_HANDLE, 0, IGNORED_PTR_ARG));
+        EXPECTED_CALL(gballoc_malloc(IGNORED_NUM_ARG));
+        EXPECTED_CALL(STRING_concat(IGNORED_NUM_ARG, IGNORED_NUM_ARG));
+        EXPECTED_CALL(gballoc_free(IGNORED_PTR_ARG));
+        EXPECTED_CALL(gballoc_free(IGNORED_PTR_ARG));
+    }
+
+    EXPECTED_CALL(gballoc_malloc(IGNORED_NUM_ARG));
+    EXPECTED_CALL(STRING_concat(IGNORED_NUM_ARG, IGNORED_NUM_ARG));
+    EXPECTED_CALL(gballoc_free(IGNORED_PTR_ARG));
+
+    EXPECTED_CALL(gballoc_malloc(IGNORED_NUM_ARG));
+    EXPECTED_CALL(STRING_concat(IGNORED_PTR_ARG, IGNORED_PTR_ARG));
+    EXPECTED_CALL(gballoc_free(IGNORED_PTR_ARG));
+
+    EXPECTED_CALL(STRING_concat(IGNORED_PTR_ARG, IGNORED_PTR_ARG));
+    EXPECTED_CALL(STRING_c_str(IGNORED_PTR_ARG));
+    STRICT_EXPECTED_CALL(xio_send(TEST_IO_HANDLE, IGNORED_PTR_ARG, IGNORED_NUM_ARG, IGNORED_NUM_ARG, IGNORED_PTR_ARG))
+        .IgnoreArgument(2)
+        .IgnoreArgument(3)
+        .IgnoreArgument(4)
+        .IgnoreArgument(5);
+    EXPECTED_CALL(STRING_delete(IGNORED_PTR_ARG));
+    EXPECTED_CALL(gballoc_free(IGNORED_PTR_ARG));
+    STRICT_EXPECTED_CALL(xio_send(TEST_IO_HANDLE, IGNORED_PTR_ARG, IGNORED_NUM_ARG, IGNORED_NUM_ARG, IGNORED_PTR_ARG))
+        .IgnoreArgument(2)
+        .IgnoreArgument(3)
+        .IgnoreArgument(4)
+        .IgnoreArgument(5);
 }
 
 static void my_on_execute_complete(void* callback_context, HTTPAPI_RESULT execute_result, unsigned int statusCode, HTTP_HEADERS_HANDLE respHeader, CONSTBUFFER_HANDLE responseBuffer)
@@ -332,6 +374,7 @@ static void my_on_execute_complete(void* callback_context, HTTPAPI_RESULT execut
     (void)statusCode;
     (void)respHeader;
     (void)responseBuffer;
+    g_execute_complete_called = true;
 }
 
 /* Tests_SRS_HTTPAPI_07_002: [If any argument is NULL, HTTPAPI_CreateConnection shall return a NULL handle.] */
@@ -341,7 +384,7 @@ TEST_FUNCTION(httpapi_createconnection_hostname_NULL_fail)
     HTTP_HANDLE handle;
 
     //act
-    handle = HTTPAPI_CreateConnection(TEST_IO_HANDLE, NULL, 443);
+    handle = HTTPAPI_CreateConnection(TEST_IO_HANDLE, NULL, DEFAULT_HTTP_SECURE_PORT);
 
     //assert
     ASSERT_IS_NULL(handle);
@@ -356,7 +399,7 @@ TEST_FUNCTION(httpapi_createconnection_XIO_HANDLE_NULL_fail)
     HTTP_HANDLE handle;
 
     //act
-    handle = HTTPAPI_CreateConnection(NULL, TEST_HOSTNAME, 443);
+    handle = HTTPAPI_CreateConnection(NULL, TEST_HOSTNAME, DEFAULT_HTTP_SECURE_PORT);
 
     //assert
     ASSERT_IS_NULL(handle);
@@ -364,7 +407,7 @@ TEST_FUNCTION(httpapi_createconnection_XIO_HANDLE_NULL_fail)
     // Cleanup
 }
 
-/* Tests_SRS_HTTPAPI_07_004: [If the hostName parameter is greater than 64 characters then, HTTPAPI_CreateConnection shall return a NULL handle (rfc1035 2.3.1).] */
+/* Tests_SRS_HTTPAPI_07_004: [If the hostName parameter is greater than 64 characters then HTTPAPI_CreateConnection shall return a NULL handle (rfc1035 2.3.1).] */
 TEST_FUNCTION(httpapi_createconnection_hostname_too_long_fail)
 {
     //arrange
@@ -380,86 +423,12 @@ TEST_FUNCTION(httpapi_createconnection_hostname_too_long_fail)
     invalid_hostname[count-1] = 0x00;
 
     //act
-    handle = HTTPAPI_CreateConnection(TEST_IO_HANDLE, invalid_hostname, 443);
+    handle = HTTPAPI_CreateConnection(TEST_IO_HANDLE, invalid_hostname, DEFAULT_HTTP_SECURE_PORT);
 
     //assert
     ASSERT_IS_NULL(handle);
 
     // Cleanup
-}
-
-/* Tests_SRS_HTTPAPI_07_003: [If any failure is encountered, HTTPAPI_CreateConnection shall return a NULL handle.] */
-TEST_FUNCTION(httpapi_createconnection_allocation_fail)
-{
-    //arrange
-    HTTP_HANDLE handle;
-
-    g_fail_alloc_calls = 1;
-
-    EXPECTED_CALL(gballoc_malloc(IGNORED_NUM_ARG));
-
-    //act
-    handle = HTTPAPI_CreateConnection(TEST_IO_HANDLE, TEST_HOSTNAME, 443);
-
-    //assert
-    ASSERT_IS_NULL(handle);
-    ASSERT_ARE_EQUAL(char_ptr, umock_c_get_expected_calls(), umock_c_get_actual_calls());
-
-    // Cleanup
-}
-
-/* Tests_SRS_HTTPAPI_07_003: [If any failure is encountered, HTTPAPI_CreateConnection shall return a NULL handle.] */
-TEST_FUNCTION(httpapi_createconnection_mallocAndStrcpy_fail)
-{
-    //arrange
-    HTTP_HANDLE handle;
-
-    EXPECTED_CALL(gballoc_malloc(IGNORED_NUM_ARG));
-    STRICT_EXPECTED_CALL(mallocAndStrcpy_s(IGNORED_NUM_ARG, TEST_HOSTNAME))
-        .IgnoreArgument(1)
-        .SetReturn(__LINE__);
-    EXPECTED_CALL(gballoc_free(IGNORED_PTR_ARG));
-
-    //act
-    handle = HTTPAPI_CreateConnection(TEST_IO_HANDLE, TEST_HOSTNAME, 443);
-
-    //assert
-    ASSERT_IS_NULL(handle);
-    ASSERT_ARE_EQUAL(char_ptr, umock_c_get_expected_calls(), umock_c_get_actual_calls());
-
-    // Cleanup
-}
-
-/* Tests_SRS_HTTPAPI_07_003: [If any failure is encountered, HTTPAPI_CreateConnection shall return a NULL handle.] */
-TEST_FUNCTION(httpapi_createconnection_xio_open_fail)
-{
-    //arrange
-    HTTP_HANDLE handle;
-
-    EXPECTED_CALL(gballoc_malloc(IGNORED_NUM_ARG));
-    STRICT_EXPECTED_CALL(mallocAndStrcpy_s(IGNORED_NUM_ARG, TEST_HOSTNAME))
-        .IgnoreArgument(1);
-        //.CopyOutArgumentBuffer(1, &TEST_HOSTNAME, sizeof(TEST_HOSTNAME) );
-    STRICT_EXPECTED_CALL(xio_open(TEST_IO_HANDLE, IGNORED_PTR_ARG, IGNORED_PTR_ARG, IGNORED_PTR_ARG, IGNORED_PTR_ARG, IGNORED_PTR_ARG, IGNORED_PTR_ARG))
-        .IgnoreArgument(2)
-        .IgnoreArgument(3)
-        .IgnoreArgument(4)
-        .IgnoreArgument(5)
-        .IgnoreArgument(6)
-        .IgnoreArgument(7)
-        .SetReturn(__LINE__);
-    EXPECTED_CALL(gballoc_free(IGNORED_PTR_ARG));
-    EXPECTED_CALL(gballoc_free(IGNORED_PTR_ARG));
-
-    //act
-    handle = HTTPAPI_CreateConnection(TEST_IO_HANDLE, TEST_HOSTNAME, 443);
-
-    //assert
-    ASSERT_IS_NULL(handle);
-    ASSERT_ARE_EQUAL(char_ptr, umock_c_get_expected_calls(), umock_c_get_actual_calls());
-
-    // Cleanup
-    HTTPAPI_CloseConnection(handle);
 }
 
 /* Tests_SRS_HTTPAPI_07_001: [HTTPAPI_CreateConnection shall return on success a non-NULL handle to the HTTP interface.]*/
@@ -470,10 +439,16 @@ TEST_FUNCTION(httpapi_createconnection_succeed)
     EXPECTED_CALL(gballoc_malloc(IGNORED_NUM_ARG));
     STRICT_EXPECTED_CALL(mallocAndStrcpy_s(IGNORED_NUM_ARG, TEST_HOSTNAME))
         .IgnoreArgument(1);
-    EXPECTED_CALL(xio_open(TEST_IO_HANDLE, IGNORED_PTR_ARG, IGNORED_PTR_ARG, IGNORED_PTR_ARG, IGNORED_PTR_ARG, IGNORED_PTR_ARG, IGNORED_PTR_ARG));
+    STRICT_EXPECTED_CALL(xio_open(TEST_IO_HANDLE, IGNORED_PTR_ARG, IGNORED_PTR_ARG, IGNORED_PTR_ARG, IGNORED_PTR_ARG, IGNORED_PTR_ARG, IGNORED_PTR_ARG))
+        .IgnoreArgument(2)
+        .IgnoreArgument(3)
+        .IgnoreArgument(4)
+        .IgnoreArgument(5)
+        .IgnoreArgument(6)
+        .IgnoreArgument(7);
 
     //act
-    HTTP_HANDLE http_handle = HTTPAPI_CreateConnection(TEST_IO_HANDLE, TEST_HOSTNAME, 443);
+    HTTP_HANDLE http_handle = HTTPAPI_CreateConnection(TEST_IO_HANDLE, TEST_HOSTNAME, DEFAULT_HTTP_SECURE_PORT);
 
     //assert
     ASSERT_IS_NOT_NULL(http_handle);
@@ -481,6 +456,43 @@ TEST_FUNCTION(httpapi_createconnection_succeed)
 
     // Cleanup
     HTTPAPI_CloseConnection(http_handle);
+}
+
+/* Tests_SRS_HTTPAPI_07_003: [If any failure is encountered, HTTPAPI_CreateConnection shall return a NULL handle.] */
+/* Tests_SRS_HTTPAPI_07_003: [If any failure is encountered, HTTPAPI_CreateConnection shall return a NULL handle.] */
+/* Tests_SRS_HTTPAPI_07_003: [If any failure is encountered, HTTPAPI_CreateConnection shall return a NULL handle.] */
+TEST_FUNCTION(httpapi_createconnection_failures)
+{
+    //arrange
+    int negativeTestsInitResult = umock_c_negative_tests_init();
+    ASSERT_ARE_EQUAL(int, 0, negativeTestsInitResult);
+
+    EXPECTED_CALL(gballoc_malloc(IGNORED_NUM_ARG)).IgnoreArgument_size();
+    STRICT_EXPECTED_CALL(mallocAndStrcpy_s(IGNORED_NUM_ARG, TEST_HOSTNAME)).IgnoreArgument_destination();
+    STRICT_EXPECTED_CALL(xio_open(TEST_IO_HANDLE, IGNORED_PTR_ARG, IGNORED_PTR_ARG, IGNORED_PTR_ARG, IGNORED_PTR_ARG, IGNORED_PTR_ARG, IGNORED_PTR_ARG))
+        .IgnoreArgument(2)
+        .IgnoreArgument(3)
+        .IgnoreArgument(4)
+        .IgnoreArgument(5)
+        .IgnoreArgument(6)
+        .IgnoreArgument(7);
+
+    umock_c_negative_tests_snapshot();
+
+    //act
+    for (size_t index = 0; index < umock_c_negative_tests_call_count(); index++)
+    {
+        umock_c_negative_tests_reset();
+        umock_c_negative_tests_fail_call(index);
+
+        char tmp_msg[64];
+        sprintf(tmp_msg, "httpapi_createconnection failure in test %zu", index);
+        HTTP_HANDLE http_handle = HTTPAPI_CreateConnection(TEST_IO_HANDLE, TEST_HOSTNAME, DEFAULT_HTTP_SECURE_PORT);
+        ASSERT_IS_NULL_WITH_MSG(http_handle, tmp_msg);
+    }
+
+    // Cleanup
+    umock_c_negative_tests_deinit();
 }
 
 /* Tests_SRS_HTTPAPI_07_006: [If the handle parameter is NULL, HTTPAPI_CloseConnection shall do nothing.] */
@@ -502,7 +514,7 @@ TEST_FUNCTION(httpapi_closeconnection_handle_null_succeed)
 TEST_FUNCTION(httpapi_closeconnection_succeed)
 {
     //arrange
-    HTTP_HANDLE handle = HTTPAPI_CreateConnection(TEST_IO_HANDLE, TEST_HOSTNAME, 443);
+    HTTP_HANDLE handle = HTTPAPI_CreateConnection(TEST_IO_HANDLE, TEST_HOSTNAME, DEFAULT_HTTP_SECURE_PORT);
     umock_c_reset_all_calls();
 
     EXPECTED_CALL(xio_close(TEST_IO_HANDLE, IGNORED_PTR_ARG, IGNORED_PTR_ARG));
@@ -537,7 +549,7 @@ TEST_FUNCTION(httpapi_executerequestasync_HANDLE_NULL_fail)
 TEST_FUNCTION(httpapi_executerequestasync_relativePath_NULL_fail)
 {
     //arrange
-    HTTP_HANDLE handle = HTTPAPI_CreateConnection(TEST_IO_HANDLE, TEST_HOSTNAME, 443);
+    HTTP_HANDLE handle = HTTPAPI_CreateConnection(TEST_IO_HANDLE, TEST_HOSTNAME, DEFAULT_HTTP_SECURE_PORT);
     umock_c_reset_all_calls();
 
     //act
@@ -555,7 +567,7 @@ TEST_FUNCTION(httpapi_executerequestasync_relativePath_NULL_fail)
 TEST_FUNCTION(httpapi_executerequestasync_content_NULL_contentLength_valid_fail)
 {
     //arrange
-    HTTP_HANDLE handle = HTTPAPI_CreateConnection(TEST_IO_HANDLE, TEST_HOSTNAME, 443);
+    HTTP_HANDLE handle = HTTPAPI_CreateConnection(TEST_IO_HANDLE, TEST_HOSTNAME, DEFAULT_HTTP_SECURE_PORT);
     umock_c_reset_all_calls();
 
     //act
@@ -573,7 +585,7 @@ TEST_FUNCTION(httpapi_executerequestasync_content_NULL_contentLength_valid_fail)
 TEST_FUNCTION(httpapi_executerequestasync_content_valid_contentLength_0_fail)
 {
     //arrange
-    HTTP_HANDLE handle = HTTPAPI_CreateConnection(TEST_IO_HANDLE, TEST_HOSTNAME, 443);
+    HTTP_HANDLE handle = HTTPAPI_CreateConnection(TEST_IO_HANDLE, TEST_HOSTNAME, DEFAULT_HTTP_SECURE_PORT);
     umock_c_reset_all_calls();
 
     //act
@@ -591,7 +603,7 @@ TEST_FUNCTION(httpapi_executerequestasync_content_valid_contentLength_0_fail)
 TEST_FUNCTION(httpapi_executerequestasync_invalid_state_fail)
 {
     //arrange
-    HTTP_HANDLE handle = HTTPAPI_CreateConnection(TEST_IO_HANDLE, TEST_HOSTNAME, 443);
+    HTTP_HANDLE handle = HTTPAPI_CreateConnection(TEST_IO_HANDLE, TEST_HOSTNAME, DEFAULT_HTTP_SECURE_PORT);
     HTTPAPI_RESULT http_result = HTTPAPI_ExecuteRequestAsync(handle, HTTPAPI_REQUEST_GET, TEST_RELATIVE_PATH, NULL, NULL, 0, my_on_execute_complete, NULL);
     ASSERT_ARE_EQUAL(HTTPAPI_RESULT, HTTPAPI_OK, http_result);
     umock_c_reset_all_calls();
@@ -607,103 +619,15 @@ TEST_FUNCTION(httpapi_executerequestasync_invalid_state_fail)
     HTTPAPI_CloseConnection(handle);
 }
 
-/* Tests_SRS_HTTPAPI_07_026: [If an error is encountered during the request line construction HTTPAPI_ExecuteRequestAsync shall return HTTPAPI_REQUEST_LINE_PROCESSING_ERROR.] */
-TEST_FUNCTION(httpapi_executerequestasync_string_proc_alloc_fail)
-{
-    //arrange
-    HTTP_HANDLE handle = HTTPAPI_CreateConnection(TEST_IO_HANDLE, TEST_HOSTNAME, 443);
-    umock_c_reset_all_calls();
-
-    EXPECTED_CALL(gballoc_malloc(IGNORED_NUM_ARG));
-
-    g_fail_alloc_calls = 2;
-
-    //act
-    HTTPAPI_RESULT http_result = HTTPAPI_ExecuteRequestAsync(handle, HTTPAPI_REQUEST_GET, TEST_RELATIVE_PATH, NULL, NULL, 0, my_on_execute_complete, NULL);
-
-    //assert
-    ASSERT_ARE_EQUAL(HTTPAPI_RESULT, HTTPAPI_REQUEST_LINE_PROCESSING_ERROR, http_result);
-    ASSERT_ARE_EQUAL(char_ptr, umock_c_get_expected_calls(), umock_c_get_actual_calls());
-
-    // Cleanup
-    HTTPAPI_CloseConnection(handle);
-}
-
-/* Tests_SRS_HTTPAPI_07_027: [If any memory allocation are encountered HTTPAPI_ExecuteRequestAsync shall return HTTPAPI_ALLOC_FAILED.] */
-TEST_FUNCTION(httpapi_executerequestasync_string_construct_fail)
-{
-    //arrange
-    HTTP_HANDLE handle = HTTPAPI_CreateConnection(TEST_IO_HANDLE, TEST_HOSTNAME, 443);
-    umock_c_reset_all_calls();
-
-    EXPECTED_CALL(gballoc_malloc(IGNORED_NUM_ARG));
-    EXPECTED_CALL(STRING_construct(IGNORED_NUM_ARG));
-    EXPECTED_CALL(gballoc_free(IGNORED_PTR_ARG));
-
-    g_string_construct_fails = true;
-
-    //act
-    HTTPAPI_RESULT http_result = HTTPAPI_ExecuteRequestAsync(handle, HTTPAPI_REQUEST_GET, TEST_RELATIVE_PATH, NULL, NULL, 0, my_on_execute_complete, NULL);
-
-    //assert
-    ASSERT_ARE_EQUAL(HTTPAPI_RESULT, HTTPAPI_ALLOC_FAILED, http_result);
-    ASSERT_ARE_EQUAL(char_ptr, umock_c_get_expected_calls(), umock_c_get_actual_calls());
-
-    // Cleanup
-    HTTPAPI_CloseConnection(handle);
-}
-
-/* Tests_SRS_HTTPAPI_07_028: [If sending data through the xio object fails HTTPAPI_ExecuteRequestAsync shall return HTTPAPI_SEND_REQUEST_FAILED.] */
-TEST_FUNCTION(httpapi_executerequestasync_xio_send_returns_fail)
-{
-    //arrange
-    HTTP_HANDLE handle = HTTPAPI_CreateConnection(TEST_IO_HANDLE, TEST_HOSTNAME, 443);
-    umock_c_reset_all_calls();
-
-    EXPECTED_CALL(gballoc_malloc(IGNORED_NUM_ARG));
-    EXPECTED_CALL(STRING_construct(IGNORED_NUM_ARG));
-    EXPECTED_CALL(gballoc_malloc(IGNORED_NUM_ARG));
-    EXPECTED_CALL(STRING_concat(IGNORED_NUM_ARG, IGNORED_NUM_ARG));
-    EXPECTED_CALL(gballoc_free(IGNORED_PTR_ARG));
-    EXPECTED_CALL(STRING_concat(IGNORED_PTR_ARG, IGNORED_PTR_ARG));
-    STRICT_EXPECTED_CALL(xio_send(TEST_IO_HANDLE, IGNORED_PTR_ARG, IGNORED_NUM_ARG, IGNORED_NUM_ARG, IGNORED_PTR_ARG))
-        .IgnoreArgument(2)
-        .IgnoreArgument(3)
-        .IgnoreArgument(4)
-        .IgnoreArgument(5);
-
-    g_when_call_to_xio_fail = 1;
-
-    //act
-    HTTPAPI_RESULT http_result = HTTPAPI_ExecuteRequestAsync(handle, HTTPAPI_REQUEST_GET, TEST_RELATIVE_PATH, NULL, NULL, 0, my_on_execute_complete, NULL);
-
-    //assert
-    ASSERT_ARE_EQUAL(HTTPAPI_RESULT, HTTPAPI_SEND_REQUEST_FAILED, http_result);
-    ASSERT_ARE_EQUAL(char_ptr, umock_c_get_expected_calls(), umock_c_get_actual_calls());
-
-    // Cleanup
-    HTTPAPI_CloseConnection(handle);
-}
-
 /* Tests_SRS_HTTPAPI_07_022: [HTTPAPI_ExecuteRequestAsync shall support all valid HTTP request types (rfc7231 4.3).] */
 /* Tests_SRS_HTTPAPI_07_014: [HTTPAPI_ExecuteRequestAsync shall add the HOST http header to the request if not supplied (rfc7230 5.4).] */
 TEST_FUNCTION(httpapi_executerequestasync_GET_succeed)
 {
     //arrange
-    HTTP_HANDLE handle = HTTPAPI_CreateConnection(TEST_IO_HANDLE, TEST_HOSTNAME, 443);
+    HTTP_HANDLE handle = HTTPAPI_CreateConnection(TEST_IO_HANDLE, TEST_HOSTNAME, DEFAULT_HTTP_SECURE_PORT);
     umock_c_reset_all_calls();
 
-    EXPECTED_CALL(gballoc_malloc(IGNORED_NUM_ARG));
-    EXPECTED_CALL(STRING_construct(IGNORED_NUM_ARG));
-    EXPECTED_CALL(gballoc_malloc(IGNORED_NUM_ARG));
-    EXPECTED_CALL(STRING_concat(IGNORED_NUM_ARG, IGNORED_NUM_ARG));
-    EXPECTED_CALL(gballoc_free(IGNORED_PTR_ARG));
-    EXPECTED_CALL(STRING_concat(IGNORED_PTR_ARG, IGNORED_PTR_ARG));
-    STRICT_EXPECTED_CALL(xio_send(TEST_IO_HANDLE, IGNORED_PTR_ARG, IGNORED_NUM_ARG, IGNORED_NUM_ARG, IGNORED_PTR_ARG))
-        .IgnoreArgument(2)
-        .IgnoreArgument(3)
-        .IgnoreArgument(4)
-        .IgnoreArgument(5);
+    setup_httpapi_executerequestasync_mocks();
 
     //act
     HTTPAPI_RESULT http_result = HTTPAPI_ExecuteRequestAsync(handle, HTTPAPI_REQUEST_GET, TEST_RELATIVE_PATH, NULL, NULL, 0, my_on_execute_complete, NULL);
@@ -716,22 +640,62 @@ TEST_FUNCTION(httpapi_executerequestasync_GET_succeed)
     HTTPAPI_CloseConnection(handle);
 }
 
-/* Tests_SRS_HTTPAPI_07_011: [If the requestType parameter is of type POST and the contentLength not supplied HTTPAPI_ExecuteRequestAsync shall add the contentLength header (rfc7230 3.3.2).] */
+/* Tests_SRS_HTTPAPI_07_026: [If an error is encountered during the request line construction HTTPAPI_ExecuteRequestAsync shall return HTTPAPI_REQUEST_LINE_PROCESSING_ERROR.] */
+/* Tests_SRS_HTTPAPI_07_027: [If any memory allocation are encountered HTTPAPI_ExecuteRequestAsync shall return HTTPAPI_ALLOC_FAILED.] */
+/* Tests_SRS_HTTPAPI_07_028: [If sending data through the xio object fails HTTPAPI_ExecuteRequestAsync shall return HTTPAPI_SEND_REQUEST_FAILED.] */
+TEST_FUNCTION(httpapi_executerequestasync_GET_failures)
+{
+    //arrange
+    int negativeTestsInitResult = umock_c_negative_tests_init();
+    ASSERT_ARE_EQUAL(int, 0, negativeTestsInitResult);
+
+    HTTP_HANDLE handle = HTTPAPI_CreateConnection(TEST_IO_HANDLE, TEST_HOSTNAME, DEFAULT_HTTP_SECURE_PORT);
+    umock_c_reset_all_calls();
+
+    setup_httpapi_executerequestasync_mocks();
+
+    umock_c_negative_tests_snapshot();
+
+    size_t calls_cannot_fail[] = { 4, 6, 8, 9 };
+
+    //act
+    size_t count = umock_c_negative_tests_call_count();
+    for (size_t index = 0; index < count; index++)
+    {
+        if (should_skip_index(index, calls_cannot_fail, sizeof(calls_cannot_fail)/sizeof(calls_cannot_fail[0]) ) != 0)
+        {
+            continue;
+        }
+
+        umock_c_negative_tests_reset();
+        umock_c_negative_tests_fail_call(index);
+
+        char tmp_msg[64];
+        sprintf(tmp_msg, "httpapi_executerequestasync_GET failure in test %zu", index);
+
+        HTTPAPI_RESULT http_result = HTTPAPI_ExecuteRequestAsync(handle, HTTPAPI_REQUEST_GET, TEST_RELATIVE_PATH, NULL, NULL, 0, my_on_execute_complete, NULL);
+
+        //assert
+        ASSERT_ARE_NOT_EQUAL_WITH_MSG(HTTPAPI_RESULT, HTTPAPI_OK, http_result, tmp_msg);
+    }
+
+    // Cleanup
+    umock_c_negative_tests_deinit();
+    HTTPAPI_CloseConnection(handle);
+}
+
+/* Tests_SRS_HTTPAPI_07_011: [If the requestType parameter is of type POST and the Content-Length not supplied HTTPAPI_ExecuteRequestAsync shall add the Content-Length header (rfc7230 3.3.2).] */
 TEST_FUNCTION(httpapi_executerequestasync_GET_content_len_request_included_succeed)
 {
     //arrange
-    HTTP_HANDLE handle = HTTPAPI_CreateConnection(TEST_IO_HANDLE, TEST_HOSTNAME, 443);
+    HTTP_HANDLE handle = HTTPAPI_CreateConnection(TEST_IO_HANDLE, TEST_HOSTNAME, DEFAULT_HTTP_SECURE_PORT);
     umock_c_reset_all_calls();
 
     g_header_count = 4;
 
     EXPECTED_CALL(gballoc_malloc(IGNORED_NUM_ARG));
     EXPECTED_CALL(STRING_construct(IGNORED_NUM_ARG));
-    EXPECTED_CALL(gballoc_malloc(IGNORED_NUM_ARG));
-    EXPECTED_CALL(STRING_concat(IGNORED_NUM_ARG, IGNORED_NUM_ARG));
-    EXPECTED_CALL(gballoc_free(IGNORED_PTR_ARG));
-
-    EXPECTED_CALL(HTTPHeaders_GetHeaderCount(TEST_HEADER_HANDLE, IGNORED_PTR_ARG));
+    STRICT_EXPECTED_CALL(HTTPHeaders_GetHeaderCount(TEST_HEADER_HANDLE, IGNORED_PTR_ARG)).IgnoreArgument(2);
 
     for (size_t index = 0; index < g_header_count; index++)
     {
@@ -743,11 +707,14 @@ TEST_FUNCTION(httpapi_executerequestasync_GET_content_len_request_included_succe
     }
 
     EXPECTED_CALL(STRING_concat(IGNORED_PTR_ARG, IGNORED_PTR_ARG));
+    EXPECTED_CALL(STRING_c_str(IGNORED_PTR_ARG));
     STRICT_EXPECTED_CALL(xio_send(TEST_IO_HANDLE, IGNORED_PTR_ARG, IGNORED_NUM_ARG, IGNORED_NUM_ARG, IGNORED_PTR_ARG))
         .IgnoreArgument(2)
         .IgnoreArgument(3)
         .IgnoreArgument(4)
         .IgnoreArgument(5);
+    EXPECTED_CALL(STRING_delete(IGNORED_PTR_ARG));
+    EXPECTED_CALL(gballoc_free(IGNORED_PTR_ARG));
 
     //act
     HTTPAPI_RESULT http_result = HTTPAPI_ExecuteRequestAsync(handle, HTTPAPI_REQUEST_GET, TEST_RELATIVE_PATH, TEST_HEADER_HANDLE, NULL, 0, my_on_execute_complete, NULL);
@@ -760,21 +727,17 @@ TEST_FUNCTION(httpapi_executerequestasync_GET_content_len_request_included_succe
     HTTPAPI_CloseConnection(handle);
 }
 
-/* Tests_SRS_HTTPAPI_07_014: [HTTPAPI_ExecuteRequestAsync shall add the HOST http header to the request if not supplied (rfc7230 5.4).] */
+/* Tests_SRS_HTTPAPI_07_014: [HTTPAPI_ExecuteRequestAsync shall add the host http header to the request if not supplied (rfc7230 5.4).] */
 TEST_FUNCTION(httpapi_executerequestasync_GET_host_request_included_succeed)
 {
     //arrange
-    HTTP_HANDLE handle = HTTPAPI_CreateConnection(TEST_IO_HANDLE, TEST_HOSTNAME, 443);
+    HTTP_HANDLE handle = HTTPAPI_CreateConnection(TEST_IO_HANDLE, TEST_HOSTNAME, DEFAULT_HTTP_SECURE_PORT);
     umock_c_reset_all_calls();
 
     g_header_count = 3;
 
     EXPECTED_CALL(gballoc_malloc(IGNORED_NUM_ARG));
     EXPECTED_CALL(STRING_construct(IGNORED_NUM_ARG));
-    EXPECTED_CALL(gballoc_malloc(IGNORED_NUM_ARG));
-    EXPECTED_CALL(STRING_concat(IGNORED_NUM_ARG, IGNORED_NUM_ARG));
-    EXPECTED_CALL(gballoc_free(IGNORED_PTR_ARG));
-
     EXPECTED_CALL(HTTPHeaders_GetHeaderCount(TEST_HEADER_HANDLE, IGNORED_PTR_ARG));
 
     for (size_t index = 0; index < g_header_count; index++)
@@ -787,11 +750,14 @@ TEST_FUNCTION(httpapi_executerequestasync_GET_host_request_included_succeed)
     }
 
     EXPECTED_CALL(STRING_concat(IGNORED_PTR_ARG, IGNORED_PTR_ARG));
+    EXPECTED_CALL(STRING_c_str(IGNORED_PTR_ARG));
     STRICT_EXPECTED_CALL(xio_send(TEST_IO_HANDLE, IGNORED_PTR_ARG, IGNORED_NUM_ARG, IGNORED_NUM_ARG, IGNORED_PTR_ARG))
         .IgnoreArgument(2)
         .IgnoreArgument(3)
         .IgnoreArgument(4)
         .IgnoreArgument(5);
+    EXPECTED_CALL(STRING_delete(IGNORED_PTR_ARG));
+    EXPECTED_CALL(gballoc_free(IGNORED_PTR_ARG));
 
     //act
     HTTPAPI_RESULT http_result = HTTPAPI_ExecuteRequestAsync(handle, HTTPAPI_REQUEST_GET, TEST_RELATIVE_PATH, TEST_HEADER_HANDLE, NULL, 0, my_on_execute_complete, NULL);
@@ -808,19 +774,17 @@ TEST_FUNCTION(httpapi_executerequestasync_GET_host_request_included_succeed)
 TEST_FUNCTION(httpapi_executerequestasync_GetHeader_return_ERROR_fail)
 {
     //arrange
-    HTTP_HANDLE handle = HTTPAPI_CreateConnection(TEST_IO_HANDLE, TEST_HOSTNAME, 443);
+    HTTP_HANDLE handle = HTTPAPI_CreateConnection(TEST_IO_HANDLE, TEST_HOSTNAME, DEFAULT_HTTP_SECURE_PORT);
     umock_c_reset_all_calls();
 
     EXPECTED_CALL(gballoc_malloc(IGNORED_NUM_ARG));
     EXPECTED_CALL(STRING_construct(IGNORED_NUM_ARG));
-    EXPECTED_CALL(gballoc_malloc(IGNORED_NUM_ARG));
-    EXPECTED_CALL(STRING_concat(IGNORED_NUM_ARG, IGNORED_NUM_ARG));
-    EXPECTED_CALL(gballoc_free(IGNORED_PTR_ARG));
 
     EXPECTED_CALL(HTTPHeaders_GetHeaderCount(TEST_HEADER_HANDLE, IGNORED_PTR_ARG));
     EXPECTED_CALL(HTTPHeaders_GetHeader(TEST_HEADER_HANDLE, 0, IGNORED_PTR_ARG));
 
     EXPECTED_CALL(STRING_delete(IGNORED_PTR_ARG));
+    EXPECTED_CALL(gballoc_free(IGNORED_PTR_ARG));
 
     g_header_count = 1;
 
@@ -841,20 +805,20 @@ TEST_FUNCTION(httpapi_executerequestasync_GetHeader_return_ERROR_fail)
 TEST_FUNCTION(httpapi_executerequestasync_GetHeaderCount_return_0_fail)
 {
     //arrange
-    HTTP_HANDLE handle = HTTPAPI_CreateConnection(TEST_IO_HANDLE, TEST_HOSTNAME, 443);
+    HTTP_HANDLE handle = HTTPAPI_CreateConnection(TEST_IO_HANDLE, TEST_HOSTNAME, DEFAULT_HTTP_SECURE_PORT);
     umock_c_reset_all_calls();
 
     EXPECTED_CALL(gballoc_malloc(IGNORED_NUM_ARG));
     EXPECTED_CALL(STRING_construct(IGNORED_NUM_ARG));
-    EXPECTED_CALL(gballoc_malloc(IGNORED_NUM_ARG));
-    EXPECTED_CALL(STRING_concat(IGNORED_NUM_ARG, IGNORED_NUM_ARG));
-    EXPECTED_CALL(gballoc_free(IGNORED_PTR_ARG));
 
-    EXPECTED_CALL(HTTPHeaders_GetHeaderCount(TEST_HEADER_HANDLE, IGNORED_PTR_ARG));
+    STRICT_EXPECTED_CALL(HTTPHeaders_GetHeaderCount(TEST_HEADER_HANDLE, IGNORED_PTR_ARG))
+        .IgnoreArgument(2);
 
     EXPECTED_CALL(STRING_delete(IGNORED_PTR_ARG));
+    EXPECTED_CALL(gballoc_free(IGNORED_PTR_ARG));
 
     g_header_result = HTTP_HEADERS_ERROR;
+
     //act
     HTTPAPI_RESULT http_result = HTTPAPI_ExecuteRequestAsync(handle, HTTPAPI_REQUEST_GET, TEST_RELATIVE_PATH, TEST_HEADER_HANDLE, NULL, 0, my_on_execute_complete, NULL);
 
@@ -870,20 +834,10 @@ TEST_FUNCTION(httpapi_executerequestasync_GetHeaderCount_return_0_fail)
 TEST_FUNCTION(httpapi_executerequestasync_HEAD_type_succeed)
 {
     //arrange
-    HTTP_HANDLE handle = HTTPAPI_CreateConnection(TEST_IO_HANDLE, TEST_HOSTNAME, 443);
+    HTTP_HANDLE handle = HTTPAPI_CreateConnection(TEST_IO_HANDLE, TEST_HOSTNAME, DEFAULT_HTTP_SECURE_PORT);
     umock_c_reset_all_calls();
 
-    EXPECTED_CALL(gballoc_malloc(IGNORED_NUM_ARG));
-    EXPECTED_CALL(STRING_construct(IGNORED_NUM_ARG));
-    EXPECTED_CALL(gballoc_malloc(IGNORED_NUM_ARG));
-    EXPECTED_CALL(STRING_concat(IGNORED_NUM_ARG, IGNORED_NUM_ARG));
-    EXPECTED_CALL(gballoc_free(IGNORED_PTR_ARG));
-    EXPECTED_CALL(STRING_concat(IGNORED_PTR_ARG, IGNORED_PTR_ARG));
-    STRICT_EXPECTED_CALL(xio_send(TEST_IO_HANDLE, IGNORED_PTR_ARG, IGNORED_NUM_ARG, IGNORED_NUM_ARG, IGNORED_PTR_ARG))
-        .IgnoreArgument(2)
-        .IgnoreArgument(3)
-        .IgnoreArgument(4)
-        .IgnoreArgument(5);
+    setup_httpapi_executerequestasync_mocks();
 
     //act
     HTTPAPI_RESULT http_result = HTTPAPI_ExecuteRequestAsync(handle, HTTPAPI_REQUEST_HEAD, TEST_RELATIVE_PATH, NULL, NULL, 0, NULL, NULL);
@@ -896,46 +850,60 @@ TEST_FUNCTION(httpapi_executerequestasync_HEAD_type_succeed)
     HTTPAPI_CloseConnection(handle);
 }
 
+TEST_FUNCTION(httpapi_executerequestasync_HEAD_type_failures)
+{
+    //arrange
+    int negativeTestsInitResult = umock_c_negative_tests_init();
+    ASSERT_ARE_EQUAL(int, 0, negativeTestsInitResult);
+
+    HTTP_HANDLE handle = HTTPAPI_CreateConnection(TEST_IO_HANDLE, TEST_HOSTNAME, DEFAULT_HTTP_SECURE_PORT);
+    umock_c_reset_all_calls();
+
+    setup_httpapi_executerequestasync_mocks();
+
+    umock_c_negative_tests_snapshot();
+
+    size_t calls_cannot_fail[] ={ 4, 6, 8, 9 };
+
+    //act
+    size_t count = umock_c_negative_tests_call_count();
+    for (size_t index = 0; index < count; index++)
+    {
+        if (should_skip_index(index, calls_cannot_fail, sizeof(calls_cannot_fail)/sizeof(calls_cannot_fail[0])) != 0)
+        {
+            continue;
+        }
+
+        umock_c_negative_tests_reset();
+        umock_c_negative_tests_fail_call(index);
+
+        char tmp_msg[64];
+        sprintf(tmp_msg, "httpapi_executerequestasync failure in test %zu", index);
+
+        //act
+        HTTPAPI_RESULT http_result = HTTPAPI_ExecuteRequestAsync(handle, HTTPAPI_REQUEST_HEAD, TEST_RELATIVE_PATH, NULL, NULL, 0, NULL, NULL);
+
+        //assert
+        ASSERT_ARE_NOT_EQUAL_WITH_MSG(HTTPAPI_RESULT, HTTPAPI_OK, http_result, tmp_msg);
+    }
+
+    // Cleanup
+    umock_c_negative_tests_deinit();
+    HTTPAPI_CloseConnection(handle);
+}
+
+
 /* Tests_SRS_HTTPAPI_07_022: [HTTPAPI_ExecuteRequestAsync shall support all valid HTTP request types (rfc7231 4.3).] */
 /* Tests_SRS_HTTPAPI_07_012: [HTTPAPI_ExecuteRequestAsync shall add the Content-Length http header to the request if not supplied and the length of the content is > 0 or the requestType is a POST (rfc7230 3.3.2).] */
-/* Tests_SRS_HTTPAPI_07_011: [If the requestType parameter is of type POST and the contentLength not supplied HTTPAPI_ExecuteRequestAsync shall add the contentLength header (rfc7230 3.3.2).] */
+/* Tests_SRS_HTTPAPI_07_011: [If the requestType parameter is of type POST and the Content-Length not supplied HTTPAPI_ExecuteRequestAsync shall add the Content-Length header (rfc7230 3.3.2).] */
 TEST_FUNCTION(httpapi_executerequestasync_POST_succeed)
 {
     //arrange
-    HTTP_HANDLE handle = HTTPAPI_CreateConnection(TEST_IO_HANDLE, TEST_HOSTNAME, 80);
+    HTTP_HANDLE handle = HTTPAPI_CreateConnection(TEST_IO_HANDLE, TEST_HOSTNAME, DEFAULT_HTTP_PORT);
     umock_c_reset_all_calls();
 
-    EXPECTED_CALL(gballoc_malloc(IGNORED_NUM_ARG));
-    EXPECTED_CALL(STRING_construct(IGNORED_NUM_ARG));
-
-    EXPECTED_CALL(gballoc_malloc(IGNORED_NUM_ARG));
-    EXPECTED_CALL(STRING_concat(IGNORED_NUM_ARG, IGNORED_NUM_ARG));
-    EXPECTED_CALL(gballoc_free(IGNORED_PTR_ARG));
-
-    EXPECTED_CALL(HTTPHeaders_GetHeaderCount(TEST_HEADER_HANDLE, IGNORED_PTR_ARG));
-
-    EXPECTED_CALL(HTTPHeaders_GetHeader(TEST_HEADER_HANDLE, 0, IGNORED_PTR_ARG));
-    EXPECTED_CALL(gballoc_malloc(IGNORED_NUM_ARG));
-    EXPECTED_CALL(STRING_concat(IGNORED_NUM_ARG, IGNORED_NUM_ARG));
-    EXPECTED_CALL(gballoc_free(IGNORED_PTR_ARG));
-    EXPECTED_CALL(gballoc_free(IGNORED_PTR_ARG));
-
-    EXPECTED_CALL(gballoc_malloc(IGNORED_NUM_ARG));
-    EXPECTED_CALL(STRING_concat(IGNORED_NUM_ARG, IGNORED_NUM_ARG));
-    EXPECTED_CALL(gballoc_free(IGNORED_PTR_ARG));
-    EXPECTED_CALL(STRING_concat(IGNORED_PTR_ARG, IGNORED_PTR_ARG));
-    STRICT_EXPECTED_CALL(xio_send(TEST_IO_HANDLE, IGNORED_PTR_ARG, IGNORED_NUM_ARG, IGNORED_NUM_ARG, IGNORED_PTR_ARG))
-        .IgnoreArgument(2)
-        .IgnoreArgument(3)
-        .IgnoreArgument(4)
-        .IgnoreArgument(5);
-    STRICT_EXPECTED_CALL(xio_send(TEST_IO_HANDLE, IGNORED_PTR_ARG, IGNORED_NUM_ARG, IGNORED_NUM_ARG, IGNORED_PTR_ARG))
-        .IgnoreArgument(2)
-        .IgnoreArgument(3)
-        .IgnoreArgument(4)
-        .IgnoreArgument(5);
-
     g_header_count = 1;
+    setup_httpapi_executerequestasync_POST_mocks(g_header_count);
 
     //act
     HTTPAPI_RESULT http_result = HTTPAPI_ExecuteRequestAsync(handle, HTTPAPI_REQUEST_POST, TEST_RELATIVE_PATH, TEST_HEADER_HANDLE, TEST_HTTP_CONTENT, TEXT_CONTENT_LENGTH, my_on_execute_complete, NULL);
@@ -948,31 +916,47 @@ TEST_FUNCTION(httpapi_executerequestasync_POST_succeed)
     HTTPAPI_CloseConnection(handle);
 }
 
+/* Tests_SRS_HTTPAPI_07_028: [If sending data through the xio object fails HTTPAPI_ExecuteRequestAsync shall return HTTPAPI_SEND_REQUEST_FAILED.] */
 /* Tests_SRS_HTTPAPI_07_029: [If an error is encountered during the construction of the http headers HTTPAPI_ExecuteRequestAsync shall return HTTPAPI_HTTP_HEADERS_FAILED.] */
-TEST_FUNCTION(httpapi_executerequestasync_POST_string_concat_return_0_fail)
+TEST_FUNCTION(httpapi_executerequestasync_POST_failure)
 {
     //arrange
-    HTTP_HANDLE handle = HTTPAPI_CreateConnection(TEST_IO_HANDLE, TEST_HOSTNAME, 443);
+    int negativeTestsInitResult = umock_c_negative_tests_init();
+    ASSERT_ARE_EQUAL(int, 0, negativeTestsInitResult);
+
+    HTTP_HANDLE handle = HTTPAPI_CreateConnection(TEST_IO_HANDLE, TEST_HOSTNAME, DEFAULT_HTTP_PORT);
     umock_c_reset_all_calls();
 
-    EXPECTED_CALL(gballoc_malloc(IGNORED_NUM_ARG));
-    EXPECTED_CALL(STRING_construct(IGNORED_NUM_ARG));
-
-    EXPECTED_CALL(gballoc_malloc(IGNORED_NUM_ARG));
-    EXPECTED_CALL(STRING_concat(IGNORED_NUM_ARG, IGNORED_NUM_ARG))
-        .SetReturn(__LINE__);
-    EXPECTED_CALL(gballoc_free(IGNORED_PTR_ARG));
-
     g_header_count = 1;
+    setup_httpapi_executerequestasync_POST_mocks(g_header_count);
+
+    umock_c_negative_tests_snapshot();
+
+    size_t calls_cannot_fail[] = { 2, 6, 7, 10, 13, 15, 17, 18 };
 
     //act
-    HTTPAPI_RESULT http_result = HTTPAPI_ExecuteRequestAsync(handle, HTTPAPI_REQUEST_POST, TEST_RELATIVE_PATH, TEST_HEADER_HANDLE, TEST_HTTP_CONTENT, TEXT_CONTENT_LENGTH, my_on_execute_complete, NULL);
+    size_t count = umock_c_negative_tests_call_count();
+    for (size_t index = 0; index < count; index++)
+    {
+        if (should_skip_index(index, calls_cannot_fail, sizeof(calls_cannot_fail)/sizeof(calls_cannot_fail[0])) != 0)
+        {
+            continue;
+        }
 
-    //assert
-    ASSERT_ARE_EQUAL(HTTPAPI_RESULT, HTTPAPI_HTTP_HEADERS_FAILED, http_result);
-    ASSERT_ARE_EQUAL(char_ptr, umock_c_get_expected_calls(), umock_c_get_actual_calls());
+        umock_c_negative_tests_reset();
+        umock_c_negative_tests_fail_call(index);
+
+        char tmp_msg[64];
+        sprintf(tmp_msg, "httpapi_executerequestasync_POST failure in test %zu/%zu", index, count);
+
+        HTTPAPI_RESULT http_result = HTTPAPI_ExecuteRequestAsync(handle, HTTPAPI_REQUEST_POST, TEST_RELATIVE_PATH, TEST_HEADER_HANDLE, TEST_HTTP_CONTENT, TEXT_CONTENT_LENGTH, my_on_execute_complete, NULL);
+
+        //assert
+        ASSERT_ARE_NOT_EQUAL_WITH_MSG(HTTPAPI_RESULT, HTTPAPI_OK, http_result, tmp_msg);
+    }
 
     // Cleanup
+    umock_c_negative_tests_deinit();
     HTTPAPI_CloseConnection(handle);
 }
 
@@ -984,9 +968,10 @@ TEST_FUNCTION(httpapi_executerequestasync_DELETE_succeed)
     HTTP_HANDLE handle = HTTPAPI_CreateConnection(TEST_IO_HANDLE, TEST_HOSTNAME, 8080);
     umock_c_reset_all_calls();
 
-    EXPECTED_CALL(gballoc_malloc(IGNORED_NUM_ARG));
+    /*EXPECTED_CALL(gballoc_malloc(IGNORED_NUM_ARG));
     EXPECTED_CALL(STRING_construct(IGNORED_NUM_ARG));
 
+    STRICT_EXPECTED_CALL(HTTPHeaders_GetHeaderCount(TEST_HEADER_HANDLE, IGNORED_NUM_ARG)).IgnoreArgument(2);
     EXPECTED_CALL(gballoc_malloc(IGNORED_NUM_ARG));
     EXPECTED_CALL(STRING_concat(IGNORED_NUM_ARG, IGNORED_NUM_ARG));
     EXPECTED_CALL(gballoc_free(IGNORED_PTR_ARG));
@@ -995,18 +980,22 @@ TEST_FUNCTION(httpapi_executerequestasync_DELETE_succeed)
     EXPECTED_CALL(STRING_concat(IGNORED_NUM_ARG, IGNORED_NUM_ARG));
     EXPECTED_CALL(gballoc_free(IGNORED_PTR_ARG));
     EXPECTED_CALL(STRING_concat(IGNORED_PTR_ARG, IGNORED_PTR_ARG));
+    EXPECTED_CALL(STRING_c_str(IGNORED_PTR_ARG));
     STRICT_EXPECTED_CALL(xio_send(TEST_IO_HANDLE, IGNORED_PTR_ARG, IGNORED_NUM_ARG, IGNORED_NUM_ARG, IGNORED_PTR_ARG))
         .IgnoreArgument(2)
         .IgnoreArgument(3)
         .IgnoreArgument(4)
         .IgnoreArgument(5);
+    EXPECTED_CALL(STRING_delete(IGNORED_PTR_ARG));
+    EXPECTED_CALL(gballoc_free(IGNORED_PTR_ARG));
     STRICT_EXPECTED_CALL(xio_send(TEST_IO_HANDLE, IGNORED_PTR_ARG, IGNORED_NUM_ARG, IGNORED_NUM_ARG, IGNORED_PTR_ARG))
         .IgnoreArgument(2)
         .IgnoreArgument(3)
         .IgnoreArgument(4)
-        .IgnoreArgument(5);
+        .IgnoreArgument(5);*/
 
     g_header_count = 0;
+    setup_httpapi_executerequestasync_POST_mocks(g_header_count);
 
     //act
     HTTPAPI_RESULT http_result = HTTPAPI_ExecuteRequestAsync(handle, HTTPAPI_REQUEST_DELETE, TEST_RELATIVE_PATH, TEST_HEADER_HANDLE, TEST_HTTP_CONTENT, TEXT_CONTENT_LENGTH, my_on_execute_complete, NULL);
@@ -1028,15 +1017,9 @@ TEST_FUNCTION(httpapi_executerequestasync_PUT_succeed)
     umock_c_reset_all_calls();
 
     g_header_count = 3;
-
     EXPECTED_CALL(gballoc_malloc(IGNORED_NUM_ARG));
     EXPECTED_CALL(STRING_construct(IGNORED_NUM_ARG));
-
-    EXPECTED_CALL(gballoc_malloc(IGNORED_NUM_ARG));
-    EXPECTED_CALL(STRING_concat(IGNORED_NUM_ARG, IGNORED_NUM_ARG));
-    EXPECTED_CALL(gballoc_free(IGNORED_PTR_ARG));
-
-    EXPECTED_CALL(HTTPHeaders_GetHeaderCount(TEST_HEADER_HANDLE, IGNORED_PTR_ARG));
+    STRICT_EXPECTED_CALL(HTTPHeaders_GetHeaderCount(TEST_HEADER_HANDLE, IGNORED_PTR_ARG)).IgnoreArgument(2);
 
     for (size_t index = 0; index < g_header_count; index++)
     {
@@ -1048,14 +1031,17 @@ TEST_FUNCTION(httpapi_executerequestasync_PUT_succeed)
     }
 
     EXPECTED_CALL(gballoc_malloc(IGNORED_NUM_ARG));
-    EXPECTED_CALL(STRING_concat(IGNORED_NUM_ARG, IGNORED_NUM_ARG));
+    EXPECTED_CALL(STRING_concat(IGNORED_PTR_ARG, IGNORED_PTR_ARG));
     EXPECTED_CALL(gballoc_free(IGNORED_PTR_ARG));
     EXPECTED_CALL(STRING_concat(IGNORED_PTR_ARG, IGNORED_PTR_ARG));
+    EXPECTED_CALL(STRING_c_str(IGNORED_PTR_ARG));
     STRICT_EXPECTED_CALL(xio_send(TEST_IO_HANDLE, IGNORED_PTR_ARG, IGNORED_NUM_ARG, IGNORED_NUM_ARG, IGNORED_PTR_ARG))
         .IgnoreArgument(2)
         .IgnoreArgument(3)
         .IgnoreArgument(4)
         .IgnoreArgument(5);
+    EXPECTED_CALL(STRING_delete(IGNORED_PTR_ARG));
+    EXPECTED_CALL(gballoc_free(IGNORED_PTR_ARG));
     STRICT_EXPECTED_CALL(xio_send(TEST_IO_HANDLE, IGNORED_PTR_ARG, IGNORED_NUM_ARG, IGNORED_NUM_ARG, IGNORED_PTR_ARG))
         .IgnoreArgument(2)
         .IgnoreArgument(3)
@@ -1063,65 +1049,10 @@ TEST_FUNCTION(httpapi_executerequestasync_PUT_succeed)
         .IgnoreArgument(5);
 
     //act
-    HTTPAPI_RESULT http_result = HTTPAPI_ExecuteRequestAsync(handle, HTTPAPI_REQUEST_POST, TEST_RELATIVE_PATH, TEST_HEADER_HANDLE, TEST_HTTP_CONTENT, TEXT_CONTENT_LENGTH, my_on_execute_complete, NULL);
+    HTTPAPI_RESULT http_result = HTTPAPI_ExecuteRequestAsync(handle, HTTPAPI_REQUEST_PUT, TEST_RELATIVE_PATH, TEST_HEADER_HANDLE, TEST_HTTP_CONTENT, TEXT_CONTENT_LENGTH, my_on_execute_complete, NULL);
 
     //assert
     ASSERT_ARE_EQUAL(HTTPAPI_RESULT, HTTPAPI_OK, http_result);
-    ASSERT_ARE_EQUAL(char_ptr, umock_c_get_expected_calls(), umock_c_get_actual_calls());
-
-    // Cleanup
-    HTTPAPI_CloseConnection(handle);
-}
-
-/* Tests_SRS_HTTPAPI_07_028: [If sending data through the xio object fails HTTPAPI_ExecuteRequestAsync shall return HTTPAPI_SEND_REQUEST_FAILED.] */
-TEST_FUNCTION(httpapi_executerequestasync_content_send_fail)
-{
-    //arrange
-    HTTP_HANDLE handle = HTTPAPI_CreateConnection(TEST_IO_HANDLE, TEST_HOSTNAME, 80);
-    umock_c_reset_all_calls();
-
-    g_header_count = 3;
-
-    EXPECTED_CALL(gballoc_malloc(IGNORED_NUM_ARG));
-    EXPECTED_CALL(STRING_construct(IGNORED_NUM_ARG));
-
-    EXPECTED_CALL(gballoc_malloc(IGNORED_NUM_ARG));
-    EXPECTED_CALL(STRING_concat(IGNORED_NUM_ARG, IGNORED_NUM_ARG));
-    EXPECTED_CALL(gballoc_free(IGNORED_PTR_ARG));
-
-    EXPECTED_CALL(HTTPHeaders_GetHeaderCount(TEST_HEADER_HANDLE, IGNORED_PTR_ARG));
-
-    for (size_t index = 0; index < g_header_count; index++)
-    {
-        EXPECTED_CALL(HTTPHeaders_GetHeader(TEST_HEADER_HANDLE, 0, IGNORED_PTR_ARG));
-        EXPECTED_CALL(gballoc_malloc(IGNORED_NUM_ARG));
-        EXPECTED_CALL(STRING_concat(IGNORED_NUM_ARG, IGNORED_NUM_ARG));
-        EXPECTED_CALL(gballoc_free(IGNORED_PTR_ARG));
-        EXPECTED_CALL(gballoc_free(IGNORED_PTR_ARG));
-    }
-
-    EXPECTED_CALL(gballoc_malloc(IGNORED_NUM_ARG));
-    EXPECTED_CALL(STRING_concat(IGNORED_NUM_ARG, IGNORED_NUM_ARG));
-    EXPECTED_CALL(gballoc_free(IGNORED_PTR_ARG));
-    EXPECTED_CALL(STRING_concat(IGNORED_PTR_ARG, IGNORED_PTR_ARG));
-    STRICT_EXPECTED_CALL(xio_send(TEST_IO_HANDLE, IGNORED_PTR_ARG, IGNORED_NUM_ARG, IGNORED_NUM_ARG, IGNORED_PTR_ARG))
-        .IgnoreArgument(2)
-        .IgnoreArgument(3)
-        .IgnoreArgument(4)
-        .IgnoreArgument(5);
-    STRICT_EXPECTED_CALL(xio_send(TEST_IO_HANDLE, IGNORED_PTR_ARG, IGNORED_NUM_ARG, IGNORED_NUM_ARG, IGNORED_PTR_ARG))
-        .IgnoreArgument(2)
-        .IgnoreArgument(3)
-        .IgnoreArgument(4)
-        .IgnoreArgument(5);
-
-    g_when_call_to_xio_fail = 2;
-
-    //act
-    HTTPAPI_RESULT http_result = HTTPAPI_ExecuteRequestAsync(handle, HTTPAPI_REQUEST_POST, TEST_RELATIVE_PATH, TEST_HEADER_HANDLE, TEST_HTTP_CONTENT, TEXT_CONTENT_LENGTH, my_on_execute_complete, NULL);
-
-    //assert
-    ASSERT_ARE_EQUAL(HTTPAPI_RESULT, HTTPAPI_SEND_REQUEST_FAILED, http_result);
     ASSERT_ARE_EQUAL(char_ptr, umock_c_get_expected_calls(), umock_c_get_actual_calls());
 
     // Cleanup
@@ -1134,20 +1065,10 @@ TEST_FUNCTION(httpapi_executerequestasync_content_send_fail)
 TEST_FUNCTION(httpapi_executerequestasync_CONNECT_succeed)
 {
     //arrange
-    HTTP_HANDLE handle = HTTPAPI_CreateConnection(TEST_IO_HANDLE, TEST_HOSTNAME, 443);
+    HTTP_HANDLE handle = HTTPAPI_CreateConnection(TEST_IO_HANDLE, TEST_HOSTNAME, DEFAULT_HTTP_SECURE_PORT);
     umock_c_reset_all_calls();
 
-    EXPECTED_CALL(gballoc_malloc(IGNORED_NUM_ARG));
-    EXPECTED_CALL(STRING_construct(IGNORED_NUM_ARG));
-    EXPECTED_CALL(gballoc_malloc(IGNORED_NUM_ARG));
-    EXPECTED_CALL(STRING_concat(IGNORED_NUM_ARG, IGNORED_NUM_ARG));
-    EXPECTED_CALL(gballoc_free(IGNORED_PTR_ARG));
-    EXPECTED_CALL(STRING_concat(IGNORED_PTR_ARG, IGNORED_PTR_ARG));
-    STRICT_EXPECTED_CALL(xio_send(TEST_IO_HANDLE, IGNORED_PTR_ARG, IGNORED_NUM_ARG, IGNORED_NUM_ARG, IGNORED_PTR_ARG))
-        .IgnoreArgument(2)
-        .IgnoreArgument(3)
-        .IgnoreArgument(4)
-        .IgnoreArgument(5);
+    setup_httpapi_executerequestasync_mocks();
 
     //act
     HTTPAPI_RESULT http_result = HTTPAPI_ExecuteRequestAsync(handle, HTTPAPI_REQUEST_CONNECT, TEST_RELATIVE_PATH, NULL, NULL, 0, my_on_execute_complete, NULL);
@@ -1160,24 +1081,56 @@ TEST_FUNCTION(httpapi_executerequestasync_CONNECT_succeed)
     HTTPAPI_CloseConnection(handle);
 }
 
+TEST_FUNCTION(httpapi_executerequestasync_CONNECT_failures)
+{
+    //arrange
+    int negativeTestsInitResult = umock_c_negative_tests_init();
+    ASSERT_ARE_EQUAL(int, 0, negativeTestsInitResult);
+
+    HTTP_HANDLE handle = HTTPAPI_CreateConnection(TEST_IO_HANDLE, TEST_HOSTNAME, DEFAULT_HTTP_PORT);
+    umock_c_reset_all_calls();
+
+    setup_httpapi_executerequestasync_mocks();
+
+    umock_c_negative_tests_snapshot();
+
+    size_t calls_cannot_fail[] = { 4, 6, 8, 9 };
+
+    //act
+    size_t count = umock_c_negative_tests_call_count();
+    for (size_t index = 0; index < count; index++)
+    {
+        if (should_skip_index(index, calls_cannot_fail, sizeof(calls_cannot_fail)/sizeof(calls_cannot_fail[0])) != 0)
+        {
+            continue;
+        }
+
+        umock_c_negative_tests_reset();
+        umock_c_negative_tests_fail_call(index);
+
+        char tmp_msg[64];
+        sprintf(tmp_msg, "httpapi_executerequestasync_POST failure in test %zu/%zu", index, count);
+
+        //act
+        HTTPAPI_RESULT http_result = HTTPAPI_ExecuteRequestAsync(handle, HTTPAPI_REQUEST_CONNECT, TEST_RELATIVE_PATH, NULL, NULL, 0, my_on_execute_complete, NULL);
+
+        //assert
+        ASSERT_ARE_NOT_EQUAL_WITH_MSG(HTTPAPI_RESULT, HTTPAPI_OK, http_result, tmp_msg);
+    }
+
+    // Cleanup
+    umock_c_negative_tests_deinit();
+    HTTPAPI_CloseConnection(handle);
+}
+
 /* Tests_SRS_HTTPAPI_07_022: [HTTPAPI_ExecuteRequestAsync shall support all valid HTTP request types (rfc7231 4.3).] */
 TEST_FUNCTION(httpapi_executerequestasync_OPTIONS_succeed)
 {
     //arrange
-    HTTP_HANDLE handle = HTTPAPI_CreateConnection(TEST_IO_HANDLE, TEST_HOSTNAME, 443);
+    HTTP_HANDLE handle = HTTPAPI_CreateConnection(TEST_IO_HANDLE, TEST_HOSTNAME, DEFAULT_HTTP_SECURE_PORT);
     umock_c_reset_all_calls();
 
-    EXPECTED_CALL(gballoc_malloc(IGNORED_NUM_ARG));
-    EXPECTED_CALL(STRING_construct(IGNORED_NUM_ARG));
-    EXPECTED_CALL(gballoc_malloc(IGNORED_NUM_ARG));
-    EXPECTED_CALL(STRING_concat(IGNORED_NUM_ARG, IGNORED_NUM_ARG));
-    EXPECTED_CALL(gballoc_free(IGNORED_PTR_ARG));
-    EXPECTED_CALL(STRING_concat(IGNORED_PTR_ARG, IGNORED_PTR_ARG));
-    STRICT_EXPECTED_CALL(xio_send(TEST_IO_HANDLE, IGNORED_PTR_ARG, IGNORED_NUM_ARG, IGNORED_NUM_ARG, IGNORED_PTR_ARG))
-        .IgnoreArgument(2)
-        .IgnoreArgument(3)
-        .IgnoreArgument(4)
-        .IgnoreArgument(5);
+    setup_httpapi_executerequestasync_mocks();
 
     //act
     HTTPAPI_RESULT http_result = HTTPAPI_ExecuteRequestAsync(handle, HTTPAPI_REQUEST_OPTIONS, TEST_RELATIVE_PATH, NULL, NULL, 0, my_on_execute_complete, NULL);
@@ -1194,20 +1147,10 @@ TEST_FUNCTION(httpapi_executerequestasync_OPTIONS_succeed)
 TEST_FUNCTION(httpapi_executerequestasync_TRACE_succeed)
 {
     //arrange
-    HTTP_HANDLE handle = HTTPAPI_CreateConnection(TEST_IO_HANDLE, TEST_HOSTNAME, 443);
+    HTTP_HANDLE handle = HTTPAPI_CreateConnection(TEST_IO_HANDLE, TEST_HOSTNAME, DEFAULT_HTTP_SECURE_PORT);
     umock_c_reset_all_calls();
 
-    EXPECTED_CALL(gballoc_malloc(IGNORED_NUM_ARG));
-    EXPECTED_CALL(STRING_construct(IGNORED_NUM_ARG));
-    EXPECTED_CALL(gballoc_malloc(IGNORED_NUM_ARG));
-    EXPECTED_CALL(STRING_concat(IGNORED_NUM_ARG, IGNORED_NUM_ARG));
-    EXPECTED_CALL(gballoc_free(IGNORED_PTR_ARG));
-    EXPECTED_CALL(STRING_concat(IGNORED_PTR_ARG, IGNORED_PTR_ARG));
-    STRICT_EXPECTED_CALL(xio_send(TEST_IO_HANDLE, IGNORED_PTR_ARG, IGNORED_NUM_ARG, IGNORED_NUM_ARG, IGNORED_PTR_ARG))
-        .IgnoreArgument(2)
-        .IgnoreArgument(3)
-        .IgnoreArgument(4)
-        .IgnoreArgument(5);
+    setup_httpapi_executerequestasync_mocks();
 
     //act
     HTTPAPI_RESULT http_result = HTTPAPI_ExecuteRequestAsync(handle, HTTPAPI_REQUEST_TRACE, TEST_RELATIVE_PATH, NULL, NULL, 0, my_on_execute_complete, NULL);
@@ -1224,7 +1167,7 @@ TEST_FUNCTION(httpapi_executerequestasync_TRACE_succeed)
 TEST_FUNCTION(httpapi_doWork_succeed)
 {
     //arrange
-    HTTP_HANDLE handle = HTTPAPI_CreateConnection(TEST_IO_HANDLE, TEST_HOSTNAME, 443);
+    HTTP_HANDLE handle = HTTPAPI_CreateConnection(TEST_IO_HANDLE, TEST_HOSTNAME, DEFAULT_HTTP_SECURE_PORT);
     umock_c_reset_all_calls();
 
     STRICT_EXPECTED_CALL(xio_dowork(TEST_IO_HANDLE));
@@ -1273,7 +1216,7 @@ TEST_FUNCTION(httpapi_setoption_handle_NULL_fail)
 TEST_FUNCTION(httpapi_setoption_option_name_NULL_fail)
 {
     //arrange
-    HTTP_HANDLE handle = HTTPAPI_CreateConnection(TEST_IO_HANDLE, TEST_HOSTNAME, 443);
+    HTTP_HANDLE handle = HTTPAPI_CreateConnection(TEST_IO_HANDLE, TEST_HOSTNAME, DEFAULT_HTTP_SECURE_PORT);
     umock_c_reset_all_calls();
 
     //act
@@ -1292,7 +1235,7 @@ TEST_FUNCTION(httpapi_setoption_option_name_NULL_fail)
 TEST_FUNCTION(httpapi_setoption_unknown_option_name_fail)
 {
     //arrange
-    HTTP_HANDLE handle = HTTPAPI_CreateConnection(TEST_IO_HANDLE, TEST_HOSTNAME, 443);
+    HTTP_HANDLE handle = HTTPAPI_CreateConnection(TEST_IO_HANDLE, TEST_HOSTNAME, DEFAULT_HTTP_SECURE_PORT);
     umock_c_reset_all_calls();
 
     //act
@@ -1307,11 +1250,11 @@ TEST_FUNCTION(httpapi_setoption_unknown_option_name_fail)
     HTTPAPI_CloseConnection(handle);
 }
 
-/* Tests_SRS_HTTPAPI_07_031: [If a specified option recieved an unsuspected NULL value HTTPAPI_SetOption shall return HTTPAPI_INVALID_ARG.] */
+/* Tests_SRS_HTTPAPI_07_031: [If a specified option received an unsuspected NULL value HTTPAPI_SetOption shall return HTTPAPI_INVALID_ARG.] */
 TEST_FUNCTION(httpapi_setoption_log_trace_value_NULL_fail)
 {
     //arrange
-    HTTP_HANDLE handle = HTTPAPI_CreateConnection(TEST_IO_HANDLE, TEST_HOSTNAME, 443);
+    HTTP_HANDLE handle = HTTPAPI_CreateConnection(TEST_IO_HANDLE, TEST_HOSTNAME, DEFAULT_HTTP_SECURE_PORT);
     umock_c_reset_all_calls();
 
     //act
@@ -1329,7 +1272,7 @@ TEST_FUNCTION(httpapi_setoption_log_trace_value_NULL_fail)
 TEST_FUNCTION(httpapi_setoption_log_trace_succeed)
 {
     //arrange
-    HTTP_HANDLE handle = HTTPAPI_CreateConnection(TEST_IO_HANDLE, TEST_HOSTNAME, 443);
+    HTTP_HANDLE handle = HTTPAPI_CreateConnection(TEST_IO_HANDLE, TEST_HOSTNAME, DEFAULT_HTTP_SECURE_PORT);
     umock_c_reset_all_calls();
 
     //act
@@ -1399,9 +1342,9 @@ TEST_FUNCTION(httpapi_cloneoption_savedvalue_NULL_fail)
 TEST_FUNCTION(httpapi_cloneoption_logtrace_alloc_fail)
 {
     //arrange
-    EXPECTED_CALL(gballoc_malloc(IGNORED_NUM_ARG));
-
-    g_fail_alloc_calls = 1;
+    STRICT_EXPECTED_CALL(gballoc_malloc(IGNORED_NUM_ARG))
+        .IgnoreArgument_size()
+        .SetReturn((void_ptr)NULL);
 
     //act
     bool logtrace = false;
@@ -1453,6 +1396,104 @@ TEST_FUNCTION(httpapi_cloneoption_unknown_options_fail)
     ASSERT_ARE_EQUAL(char_ptr, umock_c_get_expected_calls(), umock_c_get_actual_calls());
 
     // Cleanup
+}
+
+TEST_FUNCTION(httpapi_on_bytes_recv_context_NULL_fail)
+{
+    //arrange
+    HTTP_HANDLE handle = HTTPAPI_CreateConnection(TEST_IO_HANDLE, TEST_HOSTNAME, DEFAULT_HTTP_SECURE_PORT);
+    HTTPAPI_RESULT http_result = HTTPAPI_ExecuteRequestAsync(handle, HTTPAPI_REQUEST_GET, TEST_RELATIVE_PATH, TEST_HEADER_HANDLE, NULL, 0, my_on_execute_complete, NULL);
+    ASSERT_ARE_EQUAL(HTTPAPI_RESULT, HTTPAPI_OK, http_result);
+    umock_c_reset_all_calls();
+
+    //act
+    ASSERT_IS_NOT_NULL(g_on_bytes_recv);
+    ASSERT_IS_NOT_NULL(g_on_bytes_recv_ctx);
+
+    g_on_bytes_recv(NULL, (const unsigned char*)TEST_HTTP_GET_BUFFER, strlen(TEST_HTTP_GET_BUFFER) );
+
+    //assert
+    ASSERT_ARE_EQUAL(char_ptr, umock_c_get_expected_calls(), umock_c_get_actual_calls());
+
+    // Cleanup
+    HTTPAPI_CloseConnection(handle);
+}
+
+TEST_FUNCTION(httpapi_on_bytes_recv_buffer_NULL_fail)
+{
+    //arrange
+    HTTP_HANDLE handle = HTTPAPI_CreateConnection(TEST_IO_HANDLE, TEST_HOSTNAME, DEFAULT_HTTP_SECURE_PORT);
+    HTTPAPI_RESULT http_result = HTTPAPI_ExecuteRequestAsync(handle, HTTPAPI_REQUEST_GET, TEST_RELATIVE_PATH, TEST_HEADER_HANDLE, NULL, 0, my_on_execute_complete, NULL);
+    ASSERT_ARE_EQUAL(HTTPAPI_RESULT, HTTPAPI_OK, http_result);
+    umock_c_reset_all_calls();
+
+    //act
+    ASSERT_IS_NOT_NULL(g_on_bytes_recv);
+    ASSERT_IS_NOT_NULL(g_on_bytes_recv_ctx);
+
+    g_on_bytes_recv(g_on_bytes_recv_ctx, NULL, strlen(TEST_HTTP_GET_BUFFER));
+
+    //assert
+    ASSERT_ARE_EQUAL(char_ptr, umock_c_get_expected_calls(), umock_c_get_actual_calls());
+
+    // Cleanup
+    HTTPAPI_CloseConnection(handle);
+}
+
+TEST_FUNCTION(httpapi_on_bytes_recv_len_0_fail)
+{
+    //arrange
+    HTTP_HANDLE handle = HTTPAPI_CreateConnection(TEST_IO_HANDLE, TEST_HOSTNAME, DEFAULT_HTTP_SECURE_PORT);
+    HTTPAPI_RESULT http_result = HTTPAPI_ExecuteRequestAsync(handle, HTTPAPI_REQUEST_HEAD, TEST_RELATIVE_PATH, TEST_HEADER_HANDLE, NULL, 0, my_on_execute_complete, NULL);
+    ASSERT_ARE_EQUAL(HTTPAPI_RESULT, HTTPAPI_OK, http_result);
+    umock_c_reset_all_calls();
+
+    //act
+    ASSERT_IS_NOT_NULL(g_on_bytes_recv);
+    ASSERT_IS_NOT_NULL(g_on_bytes_recv_ctx);
+
+    g_on_bytes_recv(g_on_bytes_recv_ctx, (const unsigned char*)TEST_HTTP_HEAD_BUFFER, 0);
+
+    //assert
+    ASSERT_ARE_EQUAL(char_ptr, umock_c_get_expected_calls(), umock_c_get_actual_calls());
+
+    // Cleanup
+    HTTPAPI_CloseConnection(handle);
+}
+
+TEST_FUNCTION(httpapi_on_bytes_recv_GET_request_one_call_succeed)
+{
+    //arrange
+    HTTP_HANDLE handle = HTTPAPI_CreateConnection(TEST_IO_HANDLE, TEST_HOSTNAME, DEFAULT_HTTP_SECURE_PORT);
+    HTTPAPI_RESULT http_result = HTTPAPI_ExecuteRequestAsync(handle, HTTPAPI_REQUEST_GET, TEST_RELATIVE_PATH, TEST_HEADER_HANDLE, NULL, 0, my_on_execute_complete, NULL);
+    ASSERT_ARE_EQUAL(HTTPAPI_RESULT, HTTPAPI_OK, http_result);
+    umock_c_reset_all_calls();
+
+    size_t buffer_len = strlen(TEST_HTTP_GET_BUFFER);
+    const unsigned char* buffer = (const unsigned char*)TEST_HTTP_GET_BUFFER;
+
+    //void* memory1;
+
+    STRICT_EXPECTED_CALL(HTTPHeaders_Alloc());
+    STRICT_EXPECTED_CALL(BUFFER_new());
+    STRICT_EXPECTED_CALL(gballoc_malloc(buffer_len));
+    STRICT_EXPECTED_CALL(gballoc_malloc(IGNORED_NUM_ARG)).IgnoreArgument(1);//.CaptureReturn(&memory1);
+    STRICT_EXPECTED_CALL(gballoc_free(IGNORED_PTR_ARG));//.ValidateArgument_ptr(&memory1);
+
+    STRICT_EXPECTED_CALL(CONSTBUFFER_CreateFromBuffer(IGNORED_NUM_ARG));
+
+    //act
+    ASSERT_IS_NOT_NULL(g_on_bytes_recv);
+    ASSERT_IS_NOT_NULL(g_on_bytes_recv_ctx);
+
+    g_on_bytes_recv(g_on_bytes_recv_ctx, buffer, buffer_len);
+
+    //assert
+    ASSERT_IS_TRUE(g_execute_complete_called);
+    ASSERT_ARE_EQUAL(char_ptr, umock_c_get_expected_calls(), umock_c_get_actual_calls());
+
+    // Cleanup
+    HTTPAPI_CloseConnection(handle);
 }
 
 END_TEST_SUITE(httpapi_unittests);

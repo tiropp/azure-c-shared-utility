@@ -75,7 +75,7 @@ typedef struct HTTP_HANDLE_DATA_TAG
     bool logTrace;
 } HTTP_HANDLE_DATA;
 
-static void getLogTime(char* timeResult, size_t len)
+static void get_log_time(char* timeResult, size_t len)
 {
     if (timeResult != NULL)
     {
@@ -297,7 +297,6 @@ static void on_io_open_complete(void* context, IO_OPEN_RESULT open_result)
 
 static void on_bytes_recv(void* context, const unsigned char* buffer, size_t len)
 {
-    (void)context;
     HTTP_HANDLE_DATA* http_data = (HTTP_HANDLE_DATA*)context;
     size_t index = 0;
     HTTPAPI_RESULT execute_result;
@@ -319,7 +318,7 @@ static void on_bytes_recv(void* context, const unsigned char* buffer, size_t len
             if (http_data->logTrace)
             {
                 char timeResult[TIME_MAX_BUFFER];
-                getLogTime(timeResult, TIME_MAX_BUFFER);
+                get_log_time(timeResult, TIME_MAX_BUFFER);
                 LOG(LOG_TRACE, 0, "<- %s\r\n", timeResult);
             }
         }
@@ -384,7 +383,7 @@ static void on_bytes_recv(void* context, const unsigned char* buffer, size_t len
             int headerComplete = process_header_line(&http_data->recvMsg, &index);
             if (headerComplete == 0)
             {
-                if (http_data->recvMsg.totalBodyLen == 0)
+                if (http_data->recvMsg.totalBodyLen == 0 || http_data->recvMsg.requestType == HTTPAPI_REQUEST_HEAD)
                 {
                     if (http_data->recvMsg.chunkedReply)
                     {
@@ -529,7 +528,7 @@ static void on_bytes_recv(void* context, const unsigned char* buffer, size_t len
                 }
             }
         }*/
-        if ( (http_data->recvMsg.requestType = HTTPAPI_REQUEST_HEAD && http_data->recvMsg.recvState == state_response_header) || 
+        if ( (http_data->recvMsg.requestType == HTTPAPI_REQUEST_HEAD && http_data->recvMsg.recvState == state_response_header) || 
             (http_data->recvMsg.recvState == state_message_body) || 
             (http_data->recvMsg.recvState == state_error) )
         {
@@ -580,7 +579,7 @@ static int write_http_data(HTTP_HANDLE_DATA* http_data, const unsigned char* wri
         if (http_data->logTrace)
         {
             char timeResult[TIME_MAX_BUFFER];
-            getLogTime(timeResult, TIME_MAX_BUFFER);
+            get_log_time(timeResult, TIME_MAX_BUFFER);
             LOG(LOG_TRACE, 0, "-> %s ", timeResult);
             for (size_t index = 0; index < length; index++)
             {
@@ -604,7 +603,7 @@ static int write_http_text(HTTP_HANDLE_DATA* http_data, const char* writeText)
         if (http_data->logTrace)
         {
             char timeResult[TIME_MAX_BUFFER];
-            getLogTime(timeResult, TIME_MAX_BUFFER);
+            get_log_time(timeResult, TIME_MAX_BUFFER);
             LOG(LOG_TRACE, 0, "-> %s ", timeResult);
             LOG(LOG_TRACE, 0, "%s", writeText);
         }
@@ -759,12 +758,12 @@ static HTTPAPI_RESULT construct_http_headers(HTTPAPI_REQUEST_TYPE requestType, H
             else
             {
                 /* Codes_SRS_HTTPAPI_07_012: [HTTPAPI_ExecuteRequestAsync shall add the Content-Length http header to the request if not supplied and the length of the content is > 0 or the requestType is a POST (rfc7230 3.3.2).] */
-                /* Codes_SRS_HTTPAPI_07_011: [If the requestType parameter is of type POST and the contentLength not supplied HTTPAPI_ExecuteRequestAsync shall add the contentLength header (rfc7230 3.3.2).] */
+                /* Codes_SRS_HTTPAPI_07_011: [If the requestType parameter is of type POST and the Content-Length not supplied HTTPAPI_ExecuteRequestAsync shall add the Content-Length header (rfc7230 3.3.2).] */
                 if (!contentLenFound && (contentLen > 0 || requestType == HTTPAPI_REQUEST_POST) )
                 {
                     size_t fmtLen = strlen(HTTP_CONTENT_LEN)+strlen(HTTP_CRLF_VALUE)+10;
                     char* content = malloc(fmtLen+1);
-                    if (sprintf(content, "%s: %d%s", HTTP_CONTENT_LEN, (int)contentLen, HTTP_CRLF_VALUE) <= 0)
+                    if (content == NULL)
                     {
                         /* Codes_SRS_HTTPAPI_07_029: [If an error is encountered during the construction of the http headers HTTPAPI_ExecuteRequestAsync shall return HTTPAPI_HTTP_HEADERS_FAILED.] */
                         result = HTTPAPI_HTTP_HEADERS_FAILED;
@@ -772,25 +771,34 @@ static HTTPAPI_RESULT construct_http_headers(HTTPAPI_REQUEST_TYPE requestType, H
                     }
                     else
                     {
-                        if (STRING_concat(http_preamble, content) != 0)
+                        if (sprintf(content, "%s: %d%s", HTTP_CONTENT_LEN, (int)contentLen, HTTP_CRLF_VALUE) <= 0)
                         {
                             /* Codes_SRS_HTTPAPI_07_029: [If an error is encountered during the construction of the http headers HTTPAPI_ExecuteRequestAsync shall return HTTPAPI_HTTP_HEADERS_FAILED.] */
                             result = HTTPAPI_HTTP_HEADERS_FAILED;
-                            LogError("Failed building content len header data");
+                            LogError("Failed constructing content len header data");
                         }
+                        else
+                        {
+                            if (STRING_concat(http_preamble, content) != 0)
+                            {
+                                /* Codes_SRS_HTTPAPI_07_029: [If an error is encountered during the construction of the http headers HTTPAPI_ExecuteRequestAsync shall return HTTPAPI_HTTP_HEADERS_FAILED.] */
+                                result = HTTPAPI_HTTP_HEADERS_FAILED;
+                                LogError("Failed building content len header data");
+                            }
+                        }
+                        free(content);
                     }
-                    free(content);
                 }
             }
 
-            /* Codes_SRS_HTTPAPI_07_014: [HTTPAPI_ExecuteRequestAsync shall add the HOST http header to the request if not supplied (rfc7230 5.4).] */
+            /* Codes_SRS_HTTPAPI_07_014: [HTTPAPI_ExecuteRequestAsync shall add the Host http header to the request if not supplied (rfc7230 5.4).] */
             if (!hostNameFound)
             {
                 if (requestType == HTTPAPI_REQUEST_CONNECT)
                 {
                     size_t fmtLen = strlen(HTTP_HOST_HEADER)+strlen(HTTP_CRLF_VALUE)+strlen(hostname)+8;
                     char* content = malloc(fmtLen+1);
-                    if (sprintf(content, "%s: %s:%d%s", HTTP_HOST_HEADER, hostname, port, HTTP_CRLF_VALUE) <= 0)
+                    if (content == NULL)
                     {
                         /* Codes_SRS_HTTPAPI_07_029: [If an error is encountered during the construction of the http headers HTTPAPI_ExecuteRequestAsync shall return HTTPAPI_HTTP_HEADERS_FAILED.] */
                         result = HTTPAPI_HTTP_HEADERS_FAILED;
@@ -798,35 +806,52 @@ static HTTPAPI_RESULT construct_http_headers(HTTPAPI_REQUEST_TYPE requestType, H
                     }
                     else
                     {
-                        if (STRING_concat(http_preamble, content) != 0)
+                        if (sprintf(content, "%s: %s:%d%s", HTTP_HOST_HEADER, hostname, port, HTTP_CRLF_VALUE) <= 0)
                         {
                             /* Codes_SRS_HTTPAPI_07_029: [If an error is encountered during the construction of the http headers HTTPAPI_ExecuteRequestAsync shall return HTTPAPI_HTTP_HEADERS_FAILED.] */
                             result = HTTPAPI_HTTP_HEADERS_FAILED;
-                            LogError("Failed building content len header data");
+                            LogError("Failed constructing content len header data");
                         }
+                        else
+                        {
+                            if (STRING_concat(http_preamble, content) != 0)
+                            {
+                                /* Codes_SRS_HTTPAPI_07_029: [If an error is encountered during the construction of the http headers HTTPAPI_ExecuteRequestAsync shall return HTTPAPI_HTTP_HEADERS_FAILED.] */
+                                result = HTTPAPI_HTTP_HEADERS_FAILED;
+                                LogError("Failed building content len header data");
+                            }
+                        }
+                        free(content);
                     }
-                    free(content);
                 }
                 else
                 {
                     size_t fmtLen = strlen(HTTP_HOST_HEADER)+strlen(HTTP_CRLF_VALUE)+strlen(hostname)+2;
                     char* content = malloc(fmtLen+1);
-                    if (sprintf(content, "%s: %s%s", HTTP_HOST_HEADER, hostname, HTTP_CRLF_VALUE) <= 0)
+                    if (content == NULL)
                     {
-                        /* Codes_SRS_HTTPAPI_07_029: [If an error is encountered during the construction of the http headers HTTPAPI_ExecuteRequestAsync shall return HTTPAPI_HTTP_HEADERS_FAILED.] */
                         result = HTTPAPI_HTTP_HEADERS_FAILED;
                         LogError("Failed allocating content len header data");
                     }
                     else
                     {
-                        if (STRING_concat(http_preamble, content) != 0)
+                        if (sprintf(content, "%s: %s%s", HTTP_HOST_HEADER, hostname, HTTP_CRLF_VALUE) <= 0)
                         {
                             /* Codes_SRS_HTTPAPI_07_029: [If an error is encountered during the construction of the http headers HTTPAPI_ExecuteRequestAsync shall return HTTPAPI_HTTP_HEADERS_FAILED.] */
                             result = HTTPAPI_HTTP_HEADERS_FAILED;
-                            LogError("Failed building content len header data");
+                            LogError("Failed constructing content len header data");
                         }
+                        else
+                        {
+                            if (STRING_concat(http_preamble, content) != 0)
+                            {
+                                /* Codes_SRS_HTTPAPI_07_029: [If an error is encountered during the construction of the http headers HTTPAPI_ExecuteRequestAsync shall return HTTPAPI_HTTP_HEADERS_FAILED.] */
+                                result = HTTPAPI_HTTP_HEADERS_FAILED;
+                                LogError("Failed building content len header data");
+                            }
+                        }
+                        free(content);
                     }
-                    free(content);
                 }
             }
 
@@ -893,7 +918,7 @@ HTTP_HANDLE HTTPAPI_CreateConnection(XIO_HANDLE xio, const char* hostName, int p
     {
         LogInfo("Failure: invalid parameter was NULL");
     }
-    /* Codes_SRS_HTTPAPI_07_004: [If the hostName parameter is greater than 64 characters then, HTTPAPI_CreateConnection shall return a NULL handle (rfc1035 2.3.1).] */
+    /* Codes_SRS_HTTPAPI_07_004: [If the hostName parameter is greater than 64 characters then HTTPAPI_CreateConnection shall return a NULL handle (rfc1035 2.3.1).] */
     else if (strlen(hostName) > MAX_HOSTNAME_LEN)
     {
         LogInfo("Failure: Host name length is too long");
@@ -933,10 +958,10 @@ HTTP_HANDLE HTTPAPI_CreateConnection(XIO_HANDLE xio, const char* hostName, int p
                 http_data->is_io_error = 0;
                 http_data->received_bytes_count = 0;
                 http_data->received_bytes = NULL;
+                http_data->logTrace = false;
                 memset(&http_data->recvMsg, 0, sizeof(HTTP_RECV_DATA) );
                 http_data->recvMsg.recvState = state_complete;
                 http_data->recvMsg.chunkedReply = false;
-                http_data->logTrace = false;
 
             }
         }
@@ -1059,7 +1084,7 @@ HTTPAPI_RESULT HTTPAPI_SetOption(HTTP_HANDLE handle, const char* optionName, con
     }
     else if (strcmp("logtrace", optionName) == 0)
     {
-        /* Codes_SRS_HTTPAPI_07_031: [If a specified option recieved an unsuspected NULL value HTTPAPI_SetOption shall return HTTPAPI_INVALID_ARG.] */
+        /* Codes_SRS_HTTPAPI_07_031: [If a specified option received an unsuspected NULL value HTTPAPI_SetOption shall return HTTPAPI_INVALID_ARG.] */
         if (value == NULL)
         {
             result = HTTPAPI_INVALID_ARG;

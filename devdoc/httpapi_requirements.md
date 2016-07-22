@@ -21,6 +21,9 @@ HTTAPI module provides a platform Independent http implementation
 ## Exposed API
 
 ```c
+#define DEFAULT_HTTP_PORT               80
+#define DEFAULT_HTTP_SECURE_PORT        443
+
 typedef struct HTTP_HANDLE_DATA_TAG* HTTP_HANDLE;
 
 #define HTTPAPI_RESULT_VALUES                \
@@ -79,7 +82,7 @@ HTTP_HANDLE HTTPAPI_CreateConnection(XIO_HANDLE xio, const char* hostName)
 **SRS_HTTPAPI_07_001: [**HTTPAPI_CreateConnection shall return on success a non-NULL handle to the HTTP interface.**]**  
 **SRS_HTTPAPI_07_002: [**If any argument is NULL, HTTPAPI_CreateConnection shall return a NULL handle.**]**  
 **SRS_HTTPAPI_07_003: [**If any failure is encountered, HTTPAPI_CreateConnection shall return a NULL handle.**]**  
-**SRS_HTTPAPI_07_004: [**If the hostName parameter is greater than 64 characters then, HTTPAPI_CreateConnection shall return a NULL handle (rfc1035 2.3.1).**]**  
+**SRS_HTTPAPI_07_004: [**If the hostName parameter is greater than 64 characters then HTTPAPI_CreateConnection shall return a NULL handle (rfc1035 2.3.1).**]**  
 **SRS_HTTPAPI_07_005: [**HTTPAPI_CreateConnection shall open the transport channel specified in the io parameter.**]**  
 
 ### HTTPAPI_CloseConnection
@@ -101,11 +104,10 @@ HTTPAPI_RESULT HTTPAPI_ExecuteRequestAsync(HTTP_HANDLE handle, HTTPAPI_REQUEST_T
 
 **SRS_HTTPAPI_07_009: [**If the parameters handle or relativePath are NULL, HTTPAPI_ExecuteRequestAsync shall return HTTPAPI_INVALID_ARG.**]**  
 **SRS_HTTPAPI_07_010: [**If the parameters content is not NULL and contentLength is 0 or content is NULL and contentLength is not 0, HTTPAPI_ExecuteRequestAsync shall return HTTPAPI_INVALID_ARG.**]**  
-**SRS_HTTPAPI_07_011: [**If the requestType parameter is of type POST and the contentLength not supplied HTTPAPI_ExecuteRequestAsync shall add the contentLength header (rfc7230 3.3.2).**]**  
+**SRS_HTTPAPI_07_011: [**If the requestType parameter is of type POST and the Content-Length not supplied HTTPAPI_ExecuteRequestAsync shall add the Content-Length header (rfc7230 3.3.2).**]**  
 **SRS_HTTPAPI_07_022: [**HTTPAPI_ExecuteRequestAsync shall support all valid HTTP request types (rfc7231 4.3).**]**  
-**SRS_HTTPAPI_07_012: [**HTTPAPI_ExecuteRequestAsync shall add the Content-Length http header to the request if not supplied and the length of the content is > 0 or the requestType is a POST (rfc7230 3.3.2).**]**  
 **SRS_HTTPAPI_07_013: [**If HTTPAPI_ExecuteRequestAsync is called before a previous call is complete, HTTPAPI_ExecuteRequestAsync shall return HTTPAPI_IN_PROGRESS.**]**  
-**SRS_HTTPAPI_07_014: [**HTTPAPI_ExecuteRequestAsync shall add the HOST http header to the request if not supplied (rfc7230 5.4).**]**  
+**SRS_HTTPAPI_07_014: [**HTTPAPI_ExecuteRequestAsync shall add the Host http header to the request if not supplied (rfc7230 5.4).**]**  
 **SRS_HTTPAPI_07_023: [**If the HTTPAPI_REQUEST_CONNECT type is specified HTTPAPI_ExecuteRequestAsync shall send the authority form of the request target ie 'Host: server.com:80' (rfc7231 4.3.6).**]**  
 **SRS_HTTPAPI_07_024: [**HTTPAPI_ExecuteRequestAsync shall use absolute-form when generating the request Target (rfc7230 5.3.2).**]**  
 **SRS_HTTPAPI_07_025: [**HTTPAPI_ExecuteRequestAsync shall use authority form of the request target if the port value is not the default http port (port 80) (rfc7230 5.3.3).**]**
@@ -132,17 +134,11 @@ HTTPAPI_RESULT HTTPAPI_SetOption(HTTP_HANDLE handle, const char* optionName, con
 **SRS_HTTPAPI_07_017: [**If HTTPAPI_SetOption successfully sets the given option with the supplied value it shall return HTTPAPI_OK.**]**  
 **SRS_HTTPAPI_07_018: [**If handle or optionName parameters are NULL then HTTPAPI_SetOption shall return HTTP_CLIENT_INVALID_ARG.**]**  
 **SRS_HTTPAPI_07_019: [**If HTTPAPI_SetOption encounteres a optionName that is not recognized HTTPAPI_SetOption shall return HTTP_CLIENT_INVALID_ARG.**]**  
-**SRS_HTTPAPI_07_031: [**If a specified option recieved an unsuspected NULL value HTTPAPI_SetOption shall return HTTPAPI_INVALID_ARG.**]**  
+**SRS_HTTPAPI_07_031: [**If a specified option received an unsuspected NULL value HTTPAPI_SetOption shall return HTTPAPI_INVALID_ARG.**]**  
 
-<table>
-<tr><th>Parameter</th><th>Possible Values</th><th>Details</th></tr>
-<tr><td>logtrace</td><td>true or false</td><td>Turn on or off logging of the transport data. Default: false.</td></tr>
-<tr><td>x509certificate</td><td></td><td>Sets the x509 certificate to be used by the transport.</td></tr>
-<tr><td>x509privatekey</td><td></td><td>Sets the x509 private Key to be used by the transport.</td></tr>
-<tr><td>proxyAddress</td><td></td><td>Sets the proxy address used by the transport.</td></tr>
-<tr><td>proxyUsername</td><td></td><td>Sets the proxy user used by the transport.</td></tr>
-<tr><td>proxyPassword</td><td></td><td>Sets the proxy password used by the transport.</td></tr>
-<table>  
+|Parameter|Possible Values|Details                                                      |
+|---------|---------------|-------------------------------------------------------------|
+|logtrace |true or false  |Turn on or off logging of the transport data. Default: false.|
 
 ### HTTPAPI_CloneOption
 
