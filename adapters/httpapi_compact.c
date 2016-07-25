@@ -7,7 +7,6 @@
 #endif
 
 #include <stdio.h>
-#include <stdlib.h>
 #include <ctype.h>
 #include "azure_c_shared_utility/httpapi.h"
 #include "azure_c_shared_utility/httpheaders.h"
@@ -21,9 +20,8 @@
 #include <limits.h>
 
 #define MAX_HOSTNAME     64
-#define TEMP_BUFFER_SIZE 4096
+#define TEMP_BUFFER_SIZE 1024
 
-#define CHAR_COUNT(A)   (sizeof(A) - 1)
 
 DEFINE_ENUM_STRINGS(HTTPAPI_RESULT, HTTPAPI_RESULT_VALUES)
 
@@ -37,7 +35,6 @@ typedef enum SEND_ALL_RESULT_TAG
 
 typedef struct HTTP_HANDLE_DATA_TAG
 {
-    char            host[MAX_HOSTNAME];
     char*           certificate;
     XIO_HANDLE      xio_handle;
     size_t          received_bytes_count;
@@ -83,14 +80,13 @@ static int ParseStringToHexadecimal(const char *src, int* dst)
 
 /*the following function does the same as sscanf(buf, "HTTP/%*d.%*d %d %*[^\r\n]", &ret) */
 /*this function only exists because some of platforms do not have sscanf. This is not a full implementation; it only works with well-defined HTTP response. */
-static int ParseHttpResponse(const char* src, int* dst)
+static const char HTTPprefix[5] = { 'H', 'T', 'T', 'P', '/' };
+static int  ParseHttpResponse(const char* src, int* dst)
 {
-    const char* prefix = "HTTP/";
-    while ((*prefix) != '\0')
+    for (int i = 0; i < 5; i++)
     {
-        if ((*prefix) != (*src))
+        if ((char)HTTPprefix[i] != (*src))
             return EOF;
-        prefix++;
         src++;
     }
 
@@ -98,16 +94,19 @@ static int ParseHttpResponse(const char* src, int* dst)
     {
         if ((*src) == '\0')
             return EOF;
+        src++;
     }
 
     while ((*src) != ' ')
     {
         if ((*src) == '\0')
             return EOF;
+        src++;
     }
 
     return ParseStringToDecimal(src, dst);
 }
+
 
 HTTPAPI_RESULT HTTPAPI_Init(void)
 {
@@ -127,32 +126,22 @@ HTTP_HANDLE HTTPAPI_CreateConnection(const char* hostName)
         handle = (HTTP_HANDLE_DATA*)malloc(sizeof(HTTP_HANDLE_DATA));
         if (handle != NULL)
         {
-            if (strcpy_s(handle->host, MAX_HOSTNAME, hostName) != 0)
+            TLSIO_CONFIG tlsio_config = { hostName, 443 };
+            handle->xio_handle = xio_create(platform_get_default_tlsio(), (void*)&tlsio_config);
+            if (handle->xio_handle == NULL)
             {
-                LogError("HTTPAPI_CreateConnection::Could not strcpy_s");
+                LogError("HTTPAPI_CreateConnection::xio_create failed");
                 free(handle);
                 handle = NULL;
             }
             else
             {
-                TLSIO_CONFIG tlsio_config = { hostName, 443 };
-                handle->xio_handle = xio_create(platform_get_default_tlsio(), (void*)&tlsio_config);
-                if (handle->xio_handle == NULL)
-                {
-                    LogError("HTTPAPI_CreateConnection::xio_create failed");
-                    free(handle->host);
-                    free(handle);
-                    handle = NULL;
-                }
-                else
-                {
-                    handle->is_connected = 0;
-                    handle->is_io_error = 0;
-                    handle->received_bytes_count = 0;
-                    handle->received_bytes = NULL;
-                    handle->send_all_result = SEND_ALL_RESULT_NOT_STARTED;
-                    handle->certificate = NULL;
-                }
+                handle->is_connected = 0;
+                handle->is_io_error = 0;
+                handle->received_bytes_count = 0;
+                handle->received_bytes = NULL;
+                handle->send_all_result = SEND_ALL_RESULT_NOT_STARTED;
+                handle->certificate = NULL;
             }
         }
     }
@@ -172,7 +161,7 @@ void HTTPAPI_CloseConnection(HTTP_HANDLE handle)
     {
         if (h->xio_handle != NULL)
         {
-            LogInfo("HTTPAPI_CloseConnection xio_destroy(); to %s", h->host);
+            LogInfo("HTTPAPI_CloseConnection xio_destroy()");
             xio_destroy(h->xio_handle);
         }
 
@@ -199,23 +188,17 @@ static void on_io_open_complete(void* context, IO_OPEN_RESULT open_result)
     }
 }
 
+#define TOLOWER(c) (((c>='A') && (c<='Z'))?c-'A'+'a':c)
 static int my_strnicmp(const char* s1, const char* s2, size_t n)
 {
-    size_t i;
     int result = 0;
 
-    for (i = 0; i < n; i++)
+    while(((n--)>=0) && ((*s1) != '\0') && ((*s2) != '\0') && (result == 0))
     {
         /* compute the difference between the chars */
-        result = tolower(s1[i]) - tolower(s2[i]);
-
-        /* break if we have a difference ... */
-        if ((result != 0) ||
-            /* ... or if we got to the end of one the strings */
-            (s1[i] == '\0') || (s2[i] == '\0'))
-        {
-            break;
-        }
+        result = TOLOWER(*s1) - TOLOWER(*s2);
+        s1++;
+        s2++;
     }
 
     return result;
@@ -223,22 +206,17 @@ static int my_strnicmp(const char* s1, const char* s2, size_t n)
 
 static int my_stricmp(const char* s1, const char* s2)
 {
-    size_t i = 0;
+    int result = 0;
 
-    while ((s1[i] != '\0') && (s2[i] != '\0'))
+    while (((*s1) != '\0') && ((*s2) != '\0') && (result == 0))
     {
-        /* break if we have a difference ... */
-        if (tolower(s1[i]) != tolower(s2[i]))
-        {
-            break;
-        }
-
-        i++;
+        /* compute the difference between the chars */
+        result = TOLOWER(*s1) - TOLOWER(*s2);
+        s1++;
+        s2++;
     }
 
-    /* if we broke because we are at end of string this will yield 0 */
-    /* if we broke because there was a difference this will yield non-zero  */
-    return tolower(s1[i]) - tolower(s2[i]);
+    return result;
 }
 
 static void on_bytes_received(void* context, const unsigned char* buffer, size_t size)
@@ -347,8 +325,6 @@ static int conn_send_all(HTTP_HANDLE_DATA* http_instance, char* buffer, int coun
             /* We have to loop in here until all bytes are sent or we encounter an error. */
             while (1)
             {
-                xio_dowork(http_instance->xio_handle);
-
                 /* If we got an error signalled from the underlying IO we simply report it up */
                 if (http_instance->is_io_error)
                 {
@@ -360,6 +336,8 @@ static int conn_send_all(HTTP_HANDLE_DATA* http_instance, char* buffer, int coun
                 {
                     break;
                 }
+
+                xio_dowork(http_instance->xio_handle);
 
                 /* We yield the CPU for a bit so others can do their work */
                 ThreadAPI_Sleep(1);
@@ -454,6 +432,8 @@ static int skipN(HTTP_HANDLE_DATA* http_instance, size_t n, char* buf, size_t si
     return org;
 }
 
+static const char httpapiRequestString[5][7] = { "GET", "POST", "PUT", "DELETE", "PATCH" };
+
 //Note: This function assumes that "Host:" and "Content-Length:" headers are setup
 //      by the caller of HTTPAPI_ExecuteRequest() (which is true for httptransport.c).
 HTTPAPI_RESULT HTTPAPI_ExecuteRequest(HTTP_HANDLE handle, HTTPAPI_REQUEST_TYPE requestType, const char* relativePath,
@@ -461,8 +441,7 @@ HTTPAPI_RESULT HTTPAPI_ExecuteRequest(HTTP_HANDLE handle, HTTPAPI_REQUEST_TYPE r
     size_t contentLength, unsigned int* statusCode,
     HTTP_HEADERS_HANDLE responseHeadersHandle, BUFFER_HANDLE responseContent)
 {
-
-    HTTPAPI_RESULT result;
+    HTTPAPI_RESULT result = HTTPAPI_ERROR;
     size_t  headersCount;
     char    buf[TEMP_BUFFER_SIZE];
     int     ret;
@@ -470,17 +449,9 @@ HTTPAPI_RESULT HTTPAPI_ExecuteRequest(HTTP_HANDLE handle, HTTPAPI_REQUEST_TYPE r
     bool    chunked = false;
     const unsigned char* receivedContent;
 
-    const char* method = (requestType == HTTPAPI_REQUEST_GET) ? "GET"
-        : (requestType == HTTPAPI_REQUEST_POST) ? "POST"
-        : (requestType == HTTPAPI_REQUEST_PUT) ? "PUT"
-        : (requestType == HTTPAPI_REQUEST_DELETE) ? "DELETE"
-        : (requestType == HTTPAPI_REQUEST_PATCH) ? "PATCH"
-        : NULL;
-
     if (handle == NULL ||
         relativePath == NULL ||
         httpHeadersHandle == NULL ||
-        method == NULL ||
         HTTPHeaders_GetHeaderCount(httpHeadersHandle, &headersCount) != HTTP_HEADERS_OK)
     {
         result = HTTPAPI_INVALID_ARG;
@@ -490,7 +461,7 @@ HTTPAPI_RESULT HTTPAPI_ExecuteRequest(HTTP_HANDLE handle, HTTPAPI_REQUEST_TYPE r
 
     HTTP_HANDLE_DATA* httpHandle = (HTTP_HANDLE_DATA*)handle;
 
-    if (handle->is_connected == 0)
+    if (httpHandle->is_connected == 0)
     {
         // Load the certificate
         if ((httpHandle->certificate != NULL) &&
@@ -502,7 +473,7 @@ HTTPAPI_RESULT HTTPAPI_ExecuteRequest(HTTP_HANDLE handle, HTTPAPI_REQUEST_TYPE r
         }
 
         // Make the connection
-        if (xio_open(httpHandle->xio_handle, on_io_open_complete, httpHandle, on_bytes_received, httpHandle, on_io_error, httpHandle) != 0)
+        if (xio_open(httpHandle->xio_handle, on_io_open_complete, httpHandle , on_bytes_received, httpHandle, on_io_error, httpHandle) != 0)
         {
             result = HTTPAPI_ERROR;
             LogError("Could not connect (result = %s)", ENUM_TO_STRING(HTTPAPI_RESULT, result));
@@ -512,8 +483,8 @@ HTTPAPI_RESULT HTTPAPI_ExecuteRequest(HTTP_HANDLE handle, HTTPAPI_REQUEST_TYPE r
         while (1)
         {
             xio_dowork(httpHandle->xio_handle);
-            if ((handle->is_connected == 1) ||
-                (handle->is_io_error == 1))
+            if ((httpHandle->is_connected == 1) ||
+                (httpHandle->is_io_error == 1))
             {
                 break;
             }
@@ -523,13 +494,14 @@ HTTPAPI_RESULT HTTPAPI_ExecuteRequest(HTTP_HANDLE handle, HTTPAPI_REQUEST_TYPE r
     }
 
     //Send request
-    if ((ret = snprintf(buf, sizeof(buf), "%s %s HTTP/1.1\r\n", method, relativePath)) < 0
+    if ((ret = snprintf(buf, sizeof(buf), "%s %s HTTP/1.1\r\n", httpapiRequestString[requestType], relativePath)) < 0
         || ret >= sizeof(buf))
     {
         result = HTTPAPI_STRING_PROCESSING_ERROR;
         LogError("(result = %s)", ENUM_TO_STRING(HTTPAPI_RESULT, result));
         goto exit;
     }
+
     if (conn_send_all(httpHandle, buf, strlen(buf)) < 0)
     {
         result = HTTPAPI_SEND_REQUEST_FAILED;
@@ -611,23 +583,26 @@ HTTPAPI_RESULT HTTPAPI_ExecuteRequest(HTTP_HANDLE handle, HTTPAPI_REQUEST_TYPE r
         goto exit;
     }
 
-    while (buf[0])
+    while (*buf)
     {
-        const char ContentLength[] = "content-length:";
-        const char TransferEncoding[] = "transfer-encoding:";
+        const char* ContentLength = "content-length:";
+        const int ContentLengthSize = 16;
+        const char* TransferEncoding = "transfer-encoding:";
+        const int TransferEncodingSize = 19;
 
-        if (my_strnicmp(buf, ContentLength, CHAR_COUNT(ContentLength)) == 0)
+        if (my_strnicmp(buf, ContentLength, ContentLengthSize) == 0)
         {
-            if (ParseStringToDecimal(buf + CHAR_COUNT(ContentLength), &bodyLength) != 1)
+            char* p = buf + ContentLengthSize;
+            if (ParseStringToDecimal(p, &bodyLength) != 1)
             {
                 result = HTTPAPI_READ_DATA_FAILED;
                 LogError("(result = %s)", ENUM_TO_STRING(HTTPAPI_RESULT, result));
                 goto exit;
             }
         }
-        else if (my_strnicmp(buf, TransferEncoding, CHAR_COUNT(TransferEncoding)) == 0)
+        else if (my_strnicmp(buf, TransferEncoding, TransferEncodingSize) == 0)
         {
-            const char* p = buf + CHAR_COUNT(TransferEncoding);
+            const char* p = buf + TransferEncodingSize;
             while (isspace(*p)) p++;
             if (my_stricmp(p, "chunked") == 0)
                 chunked = true;
@@ -776,10 +751,10 @@ HTTPAPI_RESULT HTTPAPI_ExecuteRequest(HTTP_HANDLE handle, HTTPAPI_REQUEST_TYPE r
 
 exit:
     if ((handle != NULL) &&
-        (handle->is_io_error != 0))
+        (httpHandle->is_io_error != 0))
     {
-        xio_close(handle->xio_handle, NULL, NULL);
-        handle->is_connected = 0;
+        xio_close(httpHandle->xio_handle, NULL, NULL);
+        httpHandle->is_connected = 0;
     }
 
     return result;

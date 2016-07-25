@@ -19,6 +19,10 @@ extern "C" {
 #include <stddef.h>
 #endif
 
+extern const char base64char[64];
+extern const char base64b16[16];
+extern const char base64b8[4];
+
 #include "azure_c_shared_utility/umock_c_prod.h"
 
 /**
