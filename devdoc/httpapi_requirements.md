@@ -103,7 +103,7 @@ HTTPAPI_RESULT HTTPAPI_ExecuteRequestAsync(HTTP_HANDLE handle, HTTPAPI_REQUEST_T
 ```
 
 **SRS_HTTPAPI_07_009: [**If the parameters handle or relativePath are NULL, HTTPAPI_ExecuteRequestAsync shall return HTTPAPI_INVALID_ARG.**]**  
-**SRS_HTTPAPI_07_010: [**If the parameters content is not NULL and contentLength is 0 or content is NULL and contentLength is not 0, HTTPAPI_ExecuteRequestAsync shall return HTTPAPI_INVALID_ARG.**]**  
+**SRS_HTTPAPI_07_010: [**If the parameters content is NULL and contentLength is not 0, HTTPAPI_ExecuteRequestAsync shall return HTTPAPI_INVALID_ARG.**]**  
 **SRS_HTTPAPI_07_011: [**If the requestType parameter is of type POST and the Content-Length not supplied HTTPAPI_ExecuteRequestAsync shall add the Content-Length header (rfc7230 3.3.2).**]**  
 **SRS_HTTPAPI_07_022: [**HTTPAPI_ExecuteRequestAsync shall support all valid HTTP request types (rfc7231 4.3).**]**  
 **SRS_HTTPAPI_07_013: [**If HTTPAPI_ExecuteRequestAsync is called before a previous call is complete, HTTPAPI_ExecuteRequestAsync shall return HTTPAPI_IN_PROGRESS.**]**  

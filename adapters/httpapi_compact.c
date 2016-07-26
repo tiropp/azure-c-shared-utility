@@ -8,7 +8,6 @@
 
 #include <stdio.h>
 #include <ctype.h>
-#include <stdbool.h>
 #include "azure_c_shared_utility/gballoc.h"
 #include "azure_c_shared_utility/httpapi.h"
 #include "azure_c_shared_utility/httpheaders.h"
@@ -22,6 +21,7 @@
 #define TIME_MAX_BUFFER         16
 #define HTTP_SECURE_PORT        443
 #define HTTP_DEFAULT_PORT       80
+#define PORT_NUM_LEN            8
 
 static const char* HTTP_PREFIX = "http://";
 static const char* HTTP_PREFIX_SECURE = "https://";
@@ -32,19 +32,20 @@ static const char* HTTP_CONTENT_LEN = "Content-Length";
 static const char* HTTP_HOST_HEADER = "Host";
 static const char* HTTP_CHUNKED_ENCODING_HDR = "Transfer-Encoding: chunked\r\n";
 static const char* HTTP_CRLF_VALUE = "\r\n";
-static const char* FORMAT_HEX_CHAR = "0x%02x ";
+
+static const char* METHOD_TYPES[] ={ "GET", "HEAD", "POST", "PUT", "DELETE", "CONNECT", "OPTIONS", "PATCH", "TRACE" };
 
 DEFINE_ENUM_STRINGS(HTTPAPI_RESULT, HTTPAPI_RESULT_VALUES)
 
 typedef enum RESPONSE_MESSAGE_STATE_TAG
 {
-    state_complete,
-    state_initial,
-    state_status_line,
-    state_response_header,
-    state_message_body,
-    state_message_chunked,
-    state_error
+    STATE_COMPLETE,
+    STATE_INITIAL,
+    STATE_STATUS_LINE,
+    STATE_RESPONSE_HEADER,
+    STATE_MESSAGE_BODY,
+    STATE_MESSAGE_CHUNKED,
+    STATE_ERROR
 } RESPONSE_MESSAGE_STATE;
 
 typedef struct HTTP_RECV_DATA_TAG
@@ -77,13 +78,27 @@ typedef struct HTTP_HANDLE_DATA_TAG
 
 static void get_log_time(char* timeResult, size_t len)
 {
-    if (timeResult != NULL)
+    if (timeResult != NULL && len > 0)
     {
         time_t localTime = time(NULL);
-        struct tm* tmInfo = localtime(&localTime);
-        if (strftime(timeResult, len, "%H:%M:%S", tmInfo) == 0)
+        if (localTime == 0)
         {
             timeResult[0] = '\0';
+        }
+        else
+        {
+            struct tm* tmInfo = localtime(&localTime);
+            if (tmInfo == NULL)
+            {
+                timeResult[0] = '\0';
+            }
+            else
+            {
+                if (strftime(timeResult, len, "%H:%M:%S", tmInfo) == 0)
+                {
+                    timeResult[0] = '\0';
+                }
+            }
         }
     }
 }
@@ -105,7 +120,7 @@ static int process_status_line(HTTP_RECV_DATA* recv_data, size_t* position)
                 if (strncpy(statusCode, initSpace, 3) == NULL)
                 {
                     LogError("Failure copying statuc code .");
-                    recv_data->recvState = state_error;
+                    recv_data->recvState = STATE_ERROR;
                     result = __LINE__;
                     break;
                 }
@@ -158,7 +173,7 @@ static int process_header_line(HTTP_RECV_DATA* recv_data, size_t* position)
             if (headerKey == NULL)
             {
                 LogError("Failure allocating header memory");
-                recv_data->recvState = state_error;
+                recv_data->recvState = STATE_ERROR;
                 result = __LINE__;
             }
             else
@@ -182,7 +197,7 @@ static int process_header_line(HTTP_RECV_DATA* recv_data, size_t* position)
                 if (headerValue == NULL)
                 {
                     LogError("Failure allocating header memory");
-                    recv_data->recvState = state_error;
+                    recv_data->recvState = STATE_ERROR;
                     result = __LINE__;
                 }
                 else
@@ -195,7 +210,7 @@ static int process_header_line(HTTP_RECV_DATA* recv_data, size_t* position)
                         LogError("Failure adding header value");
                         result = __LINE__;
                         continueProcessing = false;
-                        recv_data->recvState = state_error;
+                        recv_data->recvState = STATE_ERROR;
                     }
                     else
                     {
@@ -277,6 +292,43 @@ static int convert_char_to_hex(const unsigned char* hexText, size_t len)
     return result;
 }
 
+static int string_compare_case_insensitive(const char* str1, const char* str2)
+{
+    int result;
+    if (str1 == NULL || str2 == NULL)
+    {
+        if (str1 == str2)
+        {
+            result = 0;
+        }
+        else
+        {
+            result = __LINE__;
+        }
+    }
+    else
+    {
+        size_t len_str1 = strlen(str1);
+        size_t len_str2 = strlen(str2);
+        if (len_str1 != len_str2)
+        {
+            result = __LINE__;
+        }
+        else
+        {
+            result = 0;
+            for (size_t index = 0; index < len_str1; index++)
+            {
+                if (toupper(str1[index]) != toupper(str2[index]))
+                {
+                    result = __LINE__;
+                    break;
+                }
+            }
+        }
+    }
+    return result;
+}
 
 static void on_io_open_complete(void* context, IO_OPEN_RESULT open_result)
 {
@@ -293,6 +345,10 @@ static void on_io_open_complete(void* context, IO_OPEN_RESULT open_result)
             http_data->is_io_error = 1;
         }
     }
+    else
+    {
+        LogError("on_io_open_complete called with an NULL context.");
+    }
 }
 
 static void on_bytes_recv(void* context, const unsigned char* buffer, size_t len)
@@ -301,15 +357,20 @@ static void on_bytes_recv(void* context, const unsigned char* buffer, size_t len
     size_t index = 0;
     HTTPAPI_RESULT execute_result;
 
-    if (http_data != NULL && buffer != NULL && len > 0 && http_data->recvMsg.recvState != state_error && http_data->recvMsg.fn_execute_complete != NULL)
+    if (http_data != NULL && buffer != NULL && len > 0 && http_data->recvMsg.recvState != STATE_ERROR && http_data->recvMsg.fn_execute_complete != NULL)
     {
-        if (http_data->recvMsg.recvState == state_initial)
+        if (http_data->recvMsg.recvState == STATE_INITIAL)
         {
             if (http_data->recvMsg.respHeader == NULL)
             {
                 http_data->recvMsg.respHeader = HTTPHeaders_Alloc();
+                if (http_data->recvMsg.respHeader == NULL)
+                {
+                    http_data->recvMsg.recvState = STATE_ERROR;
+                    LogError("failure allocating HTTPHeader.");
+                }
             }
-            if (http_data->recvMsg.msgBody == NULL)
+            if (http_data->recvMsg.recvState = http_data->recvMsg.msgBody == NULL)
             {
                 http_data->recvMsg.msgBody = BUFFER_new();
             }
@@ -323,6 +384,7 @@ static void on_bytes_recv(void* context, const unsigned char* buffer, size_t len
             }
         }
 
+        // Need to look at this
         if (http_data->logTrace)
         {
             for (size_t testindex = 0; testindex < len; testindex++)
@@ -344,7 +406,7 @@ static void on_bytes_recv(void* context, const unsigned char* buffer, size_t len
             if (tmpBuff == NULL)
             {
                 LogError("Failure reallocating buffer.");
-                http_data->recvMsg.recvState = state_error;
+                http_data->recvMsg.recvState = STATE_ERROR;
                 free(http_data->recvMsg.storedBytes);
                 http_data->recvMsg.storedBytes = NULL;
                 execute_result = HTTPAPI_ALLOC_FAILED;
@@ -359,13 +421,13 @@ static void on_bytes_recv(void* context, const unsigned char* buffer, size_t len
             }
         }
 
-        if (http_data->recvMsg.recvState == state_initial)
+        if (http_data->recvMsg.recvState == STATE_INITIAL)
         {
             index = 0;
             int lineComplete = process_status_line(&http_data->recvMsg, &index);
             if (lineComplete == 0 && http_data->recvMsg.statusCode > 0)
             {
-                http_data->recvMsg.recvState = state_status_line;
+                http_data->recvMsg.recvState = STATE_STATUS_LINE;
 
                 // Let's remove the unneccessary bytes
                 size_t allocLen = http_data->recvMsg.storedLen-index;
@@ -376,7 +438,7 @@ static void on_bytes_recv(void* context, const unsigned char* buffer, size_t len
                 http_data->recvMsg.storedLen = allocLen;
             }
         }
-        if (http_data->recvMsg.recvState == state_status_line)
+        if (http_data->recvMsg.recvState == STATE_STATUS_LINE)
         {
             // Gather the Header
             index = 0;
@@ -387,19 +449,19 @@ static void on_bytes_recv(void* context, const unsigned char* buffer, size_t len
                 {
                     if (http_data->recvMsg.chunkedReply)
                     {
-                        http_data->recvMsg.recvState = state_message_chunked;
+                        http_data->recvMsg.recvState = STATE_MESSAGE_CHUNKED;
                     }
                     else
                     {
                         // Content len is 0 so we are finished with the body
                         execute_result = HTTPAPI_OK;
                         http_data->recvMsg.fn_execute_complete(http_data->recvMsg.execute_ctx, execute_result, http_data->recvMsg.statusCode, http_data->recvMsg.respHeader, NULL);
-                        http_data->recvMsg.recvState = state_message_body;
+                        http_data->recvMsg.recvState = STATE_MESSAGE_BODY;
                     }
                 }
                 else
                 {
-                    http_data->recvMsg.recvState = state_response_header;
+                    http_data->recvMsg.recvState = STATE_RESPONSE_HEADER;
                 }
             }
             if (index > 0)
@@ -413,7 +475,7 @@ static void on_bytes_recv(void* context, const unsigned char* buffer, size_t len
                 http_data->recvMsg.storedLen = allocLen;
             }
         }
-        if (http_data->recvMsg.recvState == state_response_header)
+        if (http_data->recvMsg.recvState == STATE_RESPONSE_HEADER)
         {
             if (http_data->recvMsg.totalBodyLen != 0)
             {
@@ -422,7 +484,7 @@ static void on_bytes_recv(void* context, const unsigned char* buffer, size_t len
                 {
                     if (BUFFER_build(http_data->recvMsg.msgBody, http_data->recvMsg.storedBytes, http_data->recvMsg.storedLen) != 0)
                     {
-                        http_data->recvMsg.recvState = state_error;
+                        http_data->recvMsg.recvState = STATE_ERROR;
                         parseSuccess = false;
                     }
                     else
@@ -432,7 +494,7 @@ static void on_bytes_recv(void* context, const unsigned char* buffer, size_t len
                 }
                 else if (http_data->recvMsg.storedLen > http_data->recvMsg.totalBodyLen)
                 {
-                    http_data->recvMsg.recvState = state_error;
+                    http_data->recvMsg.recvState = STATE_ERROR;
                     parseSuccess = false;
                 }
                 if (parseSuccess)
@@ -440,14 +502,14 @@ static void on_bytes_recv(void* context, const unsigned char* buffer, size_t len
                     CONSTBUFFER_HANDLE response = CONSTBUFFER_CreateFromBuffer(http_data->recvMsg.msgBody);
                     if (response == NULL)
                     {
-                        http_data->recvMsg.recvState = state_error;
+                        http_data->recvMsg.recvState = STATE_ERROR;
                         parseSuccess = false;
                     }
                     else
                     {
                         execute_result = HTTPAPI_OK;
                         http_data->recvMsg.fn_execute_complete(http_data->recvMsg.execute_ctx, execute_result, http_data->recvMsg.statusCode, http_data->recvMsg.respHeader, response);
-                        http_data->recvMsg.recvState = state_message_body;
+                        http_data->recvMsg.recvState = STATE_MESSAGE_BODY;
                         CONSTBUFFER_Destroy(response);
                     }
                 }
@@ -461,7 +523,7 @@ static void on_bytes_recv(void* context, const unsigned char* buffer, size_t len
                 }*/
             }
         }
-        /*if (http_data->recvMsg.recvState == state_message_chunked)
+        /*if (http_data->recvMsg.recvState == STATE_MESSAGE_CHUNKED)
         {
             // Chunked reply
             bool crlfEncounted = false;
@@ -491,7 +553,7 @@ static void on_bytes_recv(void* context, const unsigned char* buffer, size_t len
                         // Send the user the chunk
                         if (BUFFER_build(http_data->recvMsg.msgBody, iterator+bytesPos+2, chunkLen) != 0)
                         {
-                            http_data->recvMsg.recvState = state_error;
+                            http_data->recvMsg.recvState = STATE_ERROR;
                         }
                         else
                         {
@@ -528,9 +590,9 @@ static void on_bytes_recv(void* context, const unsigned char* buffer, size_t len
                 }
             }
         }*/
-        if ( (http_data->recvMsg.requestType == HTTPAPI_REQUEST_HEAD && http_data->recvMsg.recvState == state_response_header) || 
-            (http_data->recvMsg.recvState == state_message_body) || 
-            (http_data->recvMsg.recvState == state_error) )
+        if ( (http_data->recvMsg.requestType == HTTPAPI_REQUEST_HEAD && http_data->recvMsg.recvState == STATE_RESPONSE_HEADER) || 
+            (http_data->recvMsg.recvState == STATE_MESSAGE_BODY) || 
+            (http_data->recvMsg.recvState == STATE_ERROR) )
         {
             HTTPHeaders_Free(http_data->recvMsg.respHeader);
             http_data->recvMsg.respHeader = NULL;
@@ -539,7 +601,7 @@ static void on_bytes_recv(void* context, const unsigned char* buffer, size_t len
             free(http_data->recvMsg.storedBytes);
             http_data->recvMsg.storedBytes = NULL;
             http_data->recvMsg.storedLen = 0;
-            http_data->recvMsg.recvState = state_complete;
+            http_data->recvMsg.recvState = STATE_COMPLETE;
         }
     }
 }
@@ -552,6 +614,10 @@ static void on_io_error(void* context)
         http_data->is_io_error = 1;
         LogError("on_io_error: Error signalled by underlying IO");
     }
+    else
+    {
+        LogError("on_io_error called with an NULL context.");
+    }
 }
 
 static void on_send_complete(void* context, IO_SEND_RESULT send_result)
@@ -562,6 +628,7 @@ static void on_send_complete(void* context, IO_SEND_RESULT send_result)
         if (http_data != NULL)
         {
             http_data->is_io_error = 1;
+            LogError("on_send_complete: failure sending data to endpoint.");
         }
     }
 }
@@ -571,6 +638,7 @@ static int write_http_data(HTTP_HANDLE_DATA* http_data, const unsigned char* wri
     int result;
     if (xio_send(http_data->xio_handle, writeData, length, on_send_complete, http_data) != 0)
     {
+        LogError("xio_send failed sending http data.");
         result = __LINE__;
     }
     else
@@ -583,7 +651,14 @@ static int write_http_data(HTTP_HANDLE_DATA* http_data, const unsigned char* wri
             LOG(LOG_TRACE, 0, "-> %s ", timeResult);
             for (size_t index = 0; index < length; index++)
             {
-                LOG(LOG_TRACE, 0, "0x%02x ", writeData[index]);
+                if (isgraph(writeData[index]) )
+                {
+                    LOG(LOG_TRACE, 0, "%c ", writeData[index]);
+                }
+                else
+                {
+                    LOG(LOG_TRACE, 0, "'0x%02x' ", writeData[index]);
+                }
             }
         }
     }
@@ -595,6 +670,7 @@ static int write_http_text(HTTP_HANDLE_DATA* http_data, const char* writeText)
     int result;
     if (xio_send(http_data->xio_handle, writeText, strlen(writeText), on_send_complete, http_data) != 0)
     {
+        LogError("xio_send failed sending http data.");
         result = __LINE__;
     }
     else
@@ -604,8 +680,7 @@ static int write_http_text(HTTP_HANDLE_DATA* http_data, const char* writeText)
         {
             char timeResult[TIME_MAX_BUFFER];
             get_log_time(timeResult, TIME_MAX_BUFFER);
-            LOG(LOG_TRACE, 0, "-> %s ", timeResult);
-            LOG(LOG_TRACE, 0, "%s", writeText);
+            LOG(LOG_TRACE, 0, "-> %s %s", timeResult, writeText);
         }
     }
     return result;
@@ -617,14 +692,7 @@ static char* create_request_line(HTTPAPI_REQUEST_TYPE requestType, const char* h
 
     // Get the Method to be used
     /* Codes_SRS_HTTPAPI_07_022: [HTTPAPI_ExecuteRequestAsync shall support all valid HTTP request types (rfc7231 4.3).] */
-    const char* method = (requestType == HTTPAPI_REQUEST_HEAD) ? "HEAD"
-        : (requestType == HTTPAPI_REQUEST_POST) ? "POST"
-        : (requestType == HTTPAPI_REQUEST_PUT) ? "PUT"
-        : (requestType == HTTPAPI_REQUEST_DELETE) ? "DELETE"
-        : (requestType == HTTPAPI_REQUEST_CONNECT) ? "CONNECT"
-        : (requestType == HTTPAPI_REQUEST_OPTIONS) ? "OPTIONS"
-        : (requestType == HTTPAPI_REQUEST_TRACE) ? "TRACE"
-        : "GET";
+    const char* method = METHOD_TYPES[requestType];
 
     const char* http_prefix = NULL;
     size_t buffLen = 0;
@@ -659,7 +727,7 @@ static char* create_request_line(HTTPAPI_REQUEST_TYPE requestType, const char* h
         if (requestType == HTTPAPI_REQUEST_CONNECT || port != HTTP_DEFAULT_PORT)
         {
             /* Codes_SRS_HTTPAPI_07_024: [HTTPAPI_ExecuteRequestAsync shall use absolute-form when generating the request Target (rfc7230 5.3.2).] */
-            if (snprintf(result, buffLen+1, HTTP_REQUEST_LINE_AUTHORITY_FMT, method, http_prefix, hostname, port, relativePath) <= 0)
+            if (snprintf(result, buffLen+1, HTTP_REQUEST_LINE_AUTHORITY_FMT, method, http_prefix, hostname, port, relativePath) < 0)
             {
                 LogError("Failure writing request buffer");
                 free(result);
@@ -668,7 +736,7 @@ static char* create_request_line(HTTPAPI_REQUEST_TYPE requestType, const char* h
         }
         else
         {
-            if (snprintf(result, buffLen+1, HTTP_REQUEST_LINE_FMT, method, http_prefix, hostname, relativePath) <= 0)
+            if (snprintf(result, buffLen+1, HTTP_REQUEST_LINE_FMT, method, http_prefix, hostname, relativePath) < 0)
             {
                 LogError("Failure writing request buffer");
                 free(result);
@@ -694,7 +762,7 @@ static HTTPAPI_RESULT construct_http_headers(HTTPAPI_REQUEST_TYPE requestType, H
         result = HTTPAPI_OK;
         bool hostNameFound = false;
         bool contentLenFound = false;
-        for (size_t index = 0; index < headerCnt && result == 0; index++)
+        for (size_t index = 0; index < headerCnt && result == HTTPAPI_OK; index++)
         {
             char* header;
             if (HTTPHeaders_GetHeader(httpHeaderHandle, index, &header) != HTTP_HEADERS_OK)
@@ -715,16 +783,16 @@ static HTTPAPI_RESULT construct_http_headers(HTTPAPI_REQUEST_TYPE requestType, H
                 }
                 else
                 {
-                    if (strstr(header, HTTP_CONTENT_LEN) != NULL)
+                    if (string_compare_case_insensitive(header, HTTP_CONTENT_LEN) == 0)
                     {
                         contentLenFound = true;
                     }
-                    else if (strstr(header, HTTP_HOST_HEADER) != NULL)
+                    else if (string_compare_case_insensitive(header, HTTP_HOST_HEADER) == 0)
                     {
                         hostNameFound = true;
                     }
 
-                    if (snprintf(sendData, dataLen+1, "%s\r\n", header) <= 0)
+                    if (snprintf(sendData, dataLen+1, "%s\r\n", header) < 0)
                     {
                         result = HTTPAPI_ERROR;
                         LogError("Failed in constructing header data");
@@ -796,7 +864,7 @@ static HTTPAPI_RESULT construct_http_headers(HTTPAPI_REQUEST_TYPE requestType, H
             {
                 if (requestType == HTTPAPI_REQUEST_CONNECT)
                 {
-                    size_t fmtLen = strlen(HTTP_HOST_HEADER)+strlen(HTTP_CRLF_VALUE)+strlen(hostname)+8;
+                    size_t fmtLen = strlen(HTTP_HOST_HEADER)+strlen(HTTP_CRLF_VALUE)+strlen(hostname)+PORT_NUM_LEN;
                     char* content = malloc(fmtLen+1);
                     if (content == NULL)
                     {
@@ -859,7 +927,7 @@ static HTTPAPI_RESULT construct_http_headers(HTTPAPI_REQUEST_TYPE requestType, H
             {
                 /* Codes_SRS_HTTPAPI_07_029: [If an error is encountered during the construction of the http headers HTTPAPI_ExecuteRequestAsync shall return HTTPAPI_HTTP_HEADERS_FAILED.] */
                 result = HTTPAPI_HTTP_HEADERS_FAILED;
-                LogError("Failed sending header finalization data");
+                LogError("Failed constructing header finalization data");
             }
         }
     }
@@ -884,7 +952,7 @@ static HTTPAPI_RESULT send_http_data(HTTP_HANDLE_DATA* http_data, HTTPAPI_REQUES
         if (http_preamble == NULL)
         {
             /* Codes_SRS_HTTPAPI_07_027: [If any memory allocation are encountered HTTPAPI_ExecuteRequestAsync shall return HTTPAPI_ALLOC_FAILED.] */
-            LogError("Failure creating buffer object");
+            LogError("Failure constructing string data");
             result = HTTPAPI_ALLOC_FAILED;
         }
         else
@@ -896,7 +964,6 @@ static HTTPAPI_RESULT send_http_data(HTTP_HANDLE_DATA* http_data, HTTPAPI_REQUES
                 {
                     /* Codes_SRS_HTTPAPI_07_028: [If sending data through the xio object fails HTTPAPI_ExecuteRequestAsync shall return HTTPAPI_SEND_REQUEST_FAILED.] */
                     result = HTTPAPI_SEND_REQUEST_FAILED;
-                    LogError("Failure writing request buffer");
                 }
                 else
                 {
@@ -916,12 +983,12 @@ HTTP_HANDLE HTTPAPI_CreateConnection(XIO_HANDLE xio, const char* hostName, int p
     /* Codes_SRS_HTTPAPI_07_002: [If any argument is NULL, HTTPAPI_CreateConnection shall return a NULL handle.] */
     if (hostName == NULL || xio == NULL)
     {
-        LogInfo("Failure: invalid parameter was NULL");
+        LogError("Failure: invalid parameter was NULL");
     }
     /* Codes_SRS_HTTPAPI_07_004: [If the hostName parameter is greater than 64 characters then HTTPAPI_CreateConnection shall return a NULL handle (rfc1035 2.3.1).] */
     else if (strlen(hostName) > MAX_HOSTNAME_LEN)
     {
-        LogInfo("Failure: Host name length is too long");
+        LogError("Failure: Host name length is too long");
     }
     else
     {
@@ -929,7 +996,7 @@ HTTP_HANDLE HTTPAPI_CreateConnection(XIO_HANDLE xio, const char* hostName, int p
         http_data = (HTTP_HANDLE_DATA*)malloc(sizeof(HTTP_HANDLE_DATA));
         if (http_data == NULL)
         {
-            LogInfo("failed allocating HTTP_HANDLE_DATA");
+            LogError("failed allocating HTTP_HANDLE_DATA");
         }
         else
         {
@@ -938,7 +1005,7 @@ HTTP_HANDLE HTTPAPI_CreateConnection(XIO_HANDLE xio, const char* hostName, int p
             if (mallocAndStrcpy_s(&http_data->hostname, hostName) != 0)
             {
                 /* Codes_SRS_HTTPAPI_07_003: [If any failure is encountered, HTTPAPI_CreateConnection shall return a NULL handle.] */
-                LogError("Failure opening xio connection");
+                LogError("Failure allocating hostname");
                 free(http_data);
                 http_data = NULL;
             }
@@ -946,7 +1013,7 @@ HTTP_HANDLE HTTPAPI_CreateConnection(XIO_HANDLE xio, const char* hostName, int p
             else if (xio_open(http_data->xio_handle, on_io_open_complete, http_data, on_bytes_recv, http_data, on_io_error, http_data) != 0)
             {
                 /* Codes_SRS_HTTPAPI_07_003: [If any failure is encountered, HTTPAPI_CreateConnection shall return a NULL handle.] */
-                LogError("Failure allocating hostname");
+                LogError("Failure opening xio connection");
                 free(http_data->hostname);
                 free(http_data);
                 http_data = NULL;
@@ -960,7 +1027,7 @@ HTTP_HANDLE HTTPAPI_CreateConnection(XIO_HANDLE xio, const char* hostName, int p
                 http_data->received_bytes = NULL;
                 http_data->logTrace = false;
                 memset(&http_data->recvMsg, 0, sizeof(HTTP_RECV_DATA) );
-                http_data->recvMsg.recvState = state_complete;
+                http_data->recvMsg.recvState = STATE_COMPLETE;
                 http_data->recvMsg.chunkedReply = false;
 
             }
@@ -979,7 +1046,10 @@ void HTTPAPI_CloseConnection(HTTP_HANDLE handle)
         /* Codes_SRS_HTTPAPI_07_008: [HTTPAPI_CloseConnection shall close the transport channel associated with this connection.] */
         if (http_data->xio_handle != NULL)
         {
-            (void)xio_close(http_data->xio_handle, NULL, NULL);
+            if (xio_close(http_data->xio_handle, NULL, NULL) != 0)
+            {
+                LogError("xio_close failed");
+            }
         }
         /* Codes_SRS_HTTPAPI_07_007: [HTTPAPI_CloseConnection shall free all resources associated with the HTTP_HANDLE.] */
         if (http_data->hostname)
@@ -1005,7 +1075,7 @@ HTTPAPI_RESULT HTTPAPI_ExecuteRequest(HTTP_HANDLE handle, HTTPAPI_REQUEST_TYPE r
     (void)responseHeadersHandle;
     (void)responseContent;
 
-    // This shall call into the HTTPAPI_ExecuteRequestAsync function once the recieve code is complete
+    // This shall call into the HTTPAPI_ExecuteRequestAsync function once the receive code is complete
     HTTPAPI_RESULT result = HTTPAPI_ERROR;
     return result;
 }
@@ -1018,35 +1088,36 @@ HTTPAPI_RESULT HTTPAPI_ExecuteRequestAsync(HTTP_HANDLE handle, HTTPAPI_REQUEST_T
     HTTP_HANDLE_DATA* http_data = (HTTP_HANDLE_DATA*)handle;
 
     /* Codes_SRS_HTTPAPI_07_009: [If the parameters handle or relativePath are NULL, HTTPAPI_ExecuteRequestAsync shall return HTTPAPI_INVALID_ARG.] */
-    /* Codes_SRS_HTTPAPI_07_010: [If the parameters content is not NULL and contentLength is 0 or content is NULL and contentLength is not 0, HTTPAPI_ExecuteRequestAsync shall return HTTPAPI_INVALID_ARG.] */
-    if (http_data == NULL || relativePath == NULL ||
-        (content != NULL && contentLength == 0) || (content == NULL && contentLength != 0))
+    /* Codes_SRS_HTTPAPI_07_010: [If the parameters content is NULL and contentLength is not 0, HTTPAPI_ExecuteRequestAsync shall return HTTPAPI_INVALID_ARG.] */
+    if (http_data == NULL || relativePath == NULL || (content == NULL && contentLength != 0) )
     {
+        LogError("Invalid Argument specified to HTTPAPI_ExecuteRequestAsync");
         result = HTTPAPI_INVALID_ARG;
     }
     /* Codes_SRS_HTTPAPI_07_013: [If HTTPAPI_ExecuteRequestAsync is called before a previous call is complete, HTTPAPI_ExecuteRequestAsync shall return HTTPAPI_IN_PROGRESS.] */
-    else if (http_data->recvMsg.recvState != state_complete && 
-        http_data->recvMsg.recvState != state_error)
+    else if (http_data->recvMsg.recvState != STATE_COMPLETE && 
+        http_data->recvMsg.recvState != STATE_ERROR)
     {
+        LogError("Invalid receive state");
         result = HTTPAPI_IN_PROGRESS;
     }
     else
     {
-        http_data->recvMsg.recvState = state_initial;
+        http_data->recvMsg.recvState = STATE_INITIAL;
         http_data->recvMsg.fn_execute_complete = on_execute_complete;
         http_data->recvMsg.execute_ctx = callback_context;
         http_data->recvMsg.requestType = requestType;
         result = send_http_data(http_data, requestType, relativePath, httpHeadersHandle, contentLength, false);
         if (result == HTTPAPI_OK)
         {
-            if (content != NULL && contentLength != 0)
+            if (content != NULL)
             {
                 if (write_http_data(http_data, content, contentLength) != 0)
                 {
                     /* Codes_SRS_HTTPAPI_07_028: [If sending data through the xio object fails HTTPAPI_ExecuteRequestAsync shall return HTTPAPI_SEND_REQUEST_FAILED.] */
                     result = HTTPAPI_SEND_REQUEST_FAILED;
                     LogError("Failure writing content buffer");
-                    http_data->recvMsg.recvState = state_error;
+                    http_data->recvMsg.recvState = STATE_ERROR;
                 }
                 else
                 {
@@ -1056,7 +1127,7 @@ HTTPAPI_RESULT HTTPAPI_ExecuteRequestAsync(HTTP_HANDLE handle, HTTPAPI_REQUEST_T
         }
         else
         {
-            http_data->recvMsg.recvState = state_error;
+            http_data->recvMsg.recvState = STATE_ERROR;
         }
     }
     return result;

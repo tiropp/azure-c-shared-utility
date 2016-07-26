@@ -82,6 +82,8 @@ static void* g_on_bytes_recv_ctx;
 static void* g_ioErrorCtx;
 
 static TEST_MUTEX_HANDLE test_serialize_mutex;
+static TEST_MUTEX_HANDLE g_dllByDll;
+
 static bool g_execute_complete_called = false;
 
 static size_t g_header_count = 0;
@@ -100,6 +102,9 @@ static const char* TEST_HTTP_GET_BUFFER = "HTTP/1.1 200 OK\r\nDate: Mon, 27 Jul 
 Vary: Authorization, Accept\r\nAccept-Ranges: bytes\r\nContent-Length: 58\r\nContent-Type: text/html\r\nConnection: Closed\r\n\r\n<html>\r\n<body>\r\n<h1>Hello, World!</h1>\r\n</body>\r\n</html>\r\n";
 static const char* TEST_HTTP_HEAD_BUFFER = "HTTP/1.1 200 OK\r\nDate: Mon, 27 Jul 2009 12:28:53 GMT\r\nServer: Apache/2.2.14 (Win32)\r\nLast-Modified: Wed, 22 Jul 2009 19:15:56 GMT\r\n \
 Vary: Authorization, Accept\r\nAccept-Ranges: bytes\r\nContent-Length: 88\r\nContent-Type: text/html\r\nConnection: Closed\r\n\r\n";
+static const char* TEST_HTTP_POST_BUFFER = "HTTP/1.1 200 OK\r\nDate: Mon, 27 Jul 2009 12:28:53 GMT\r\nServer: Apache/2.2.14 (Win32)\r\nLast-Modified: Wed, 22 Jul 2009 19:15:56 GMT\r\n \
+ETag: \"34aa387-d-1568eb00\"\r\nVary: Authorization,Accept\r\nAccept-Ranges: bytes\r\nContent-Length: 73\r\nContent-Type: text/html\r\nConnection: Closed\r\n\r\n\r\n<html>\r\n<body>\r\n<h1>Request Processed Successfully</h1>\r\n</body>\r\n</html>";
+static const char* TEST_HTTP_PUT_BUFFER = "HTTP/1.1 201 Created\r\nDate: Mon, 27 Jul 2009 12:28:53 GMT\r\nServer: Apache/2.2.14 (Win32)\r\nContent-type: text/html\r\nContent-length: 56\r\nConnection: Closed\r\n\r\n<html><body><h1>The file was created.</h1></body></html>";
 
 static HTTP_HEADERS_HANDLE my_HTTPHeaders_Alloc(void)
 {
@@ -200,6 +205,8 @@ TEST_SUITE_INITIALIZE(suite_init)
 {
     int result;
 
+    TEST_INITIALIZE_MEMORY_DEBUG(g_dllByDll);
+
     test_serialize_mutex = TEST_MUTEX_CREATE();
     ASSERT_IS_NOT_NULL(test_serialize_mutex);
 
@@ -231,7 +238,9 @@ TEST_SUITE_INITIALIZE(suite_init)
     REGISTER_GLOBAL_MOCK_FAIL_RETURN(HTTPHeaders_Alloc, NULL);
     REGISTER_GLOBAL_MOCK_HOOK(HTTPHeaders_Free, my_HTTPHeaders_Free);
     REGISTER_GLOBAL_MOCK_RETURN(HTTPHeaders_AddHeaderNameValuePair, HTTP_HEADERS_OK);
+    REGISTER_GLOBAL_MOCK_FAIL_RETURN(HTTPHeaders_AddHeaderNameValuePair, HTTP_HEADERS_ERROR);
     REGISTER_GLOBAL_MOCK_RETURN(HTTPHeaders_ReplaceHeaderNameValuePair, HTTP_HEADERS_OK);
+    REGISTER_GLOBAL_MOCK_FAIL_RETURN(HTTPHeaders_ReplaceHeaderNameValuePair, HTTP_HEADERS_ERROR);
 
     REGISTER_GLOBAL_MOCK_HOOK(HTTPHeaders_GetHeader, my_HTTPHeaders_GetHeader);
     REGISTER_GLOBAL_MOCK_FAIL_RETURN(HTTPHeaders_GetHeader, HTTP_HEADERS_ERROR);
@@ -250,6 +259,7 @@ TEST_SUITE_INITIALIZE(suite_init)
     REGISTER_GLOBAL_MOCK_HOOK(xio_send, my_xio_send);
     REGISTER_GLOBAL_MOCK_FAIL_RETURN(xio_send, __LINE__);
     REGISTER_GLOBAL_MOCK_RETURN(xio_close, 0);
+    REGISTER_GLOBAL_MOCK_FAIL_RETURN(xio_close, __LINE__);
 
     REGISTER_GLOBAL_MOCK_HOOK(mallocAndStrcpy_s, my_mallocAndStrcpy_s);
     REGISTER_GLOBAL_MOCK_FAIL_RETURN(mallocAndStrcpy_s, __LINE__);
@@ -269,6 +279,7 @@ TEST_SUITE_CLEANUP(suite_cleanup)
 {
     umock_c_deinit();
     TEST_MUTEX_DESTROY(test_serialize_mutex);
+    TEST_DEINITIALIZE_MEMORY_DEBUG(g_dllByDll);
 }
 
 TEST_FUNCTION_INITIALIZE(method_init)
@@ -310,6 +321,20 @@ static int should_skip_index(size_t current_index, const size_t skip_array[], si
     return result;
 }
 
+static void setup_httpapi_createconnection_mocks()
+{
+    EXPECTED_CALL(gballoc_malloc(IGNORED_NUM_ARG));
+    STRICT_EXPECTED_CALL(mallocAndStrcpy_s(IGNORED_NUM_ARG, TEST_HOSTNAME))
+        .IgnoreArgument(1);
+    STRICT_EXPECTED_CALL(xio_open(TEST_IO_HANDLE, IGNORED_PTR_ARG, IGNORED_PTR_ARG, IGNORED_PTR_ARG, IGNORED_PTR_ARG, IGNORED_PTR_ARG, IGNORED_PTR_ARG))
+        .IgnoreArgument(2)
+        .IgnoreArgument(3)
+        .IgnoreArgument(4)
+        .IgnoreArgument(5)
+        .IgnoreArgument(6)
+        .IgnoreArgument(7);
+}
+
 static void setup_httpapi_executerequestasync_mocks()
 {
     EXPECTED_CALL(gballoc_malloc(IGNORED_NUM_ARG));
@@ -328,11 +353,11 @@ static void setup_httpapi_executerequestasync_mocks()
     EXPECTED_CALL(gballoc_free(IGNORED_PTR_ARG));
 }
 
-static void setup_httpapi_executerequestasync_POST_mocks(size_t header_count)
+static void setup_httpapi_executerequestasync_with_header_mocks(size_t header_count, bool content_len_included, bool include_content)
 {
     EXPECTED_CALL(gballoc_malloc(IGNORED_NUM_ARG));
     EXPECTED_CALL(STRING_construct(IGNORED_NUM_ARG));
-    EXPECTED_CALL(HTTPHeaders_GetHeaderCount(TEST_HEADER_HANDLE, IGNORED_PTR_ARG));
+    STRICT_EXPECTED_CALL(HTTPHeaders_GetHeaderCount(TEST_HEADER_HANDLE, IGNORED_PTR_ARG)).IgnoreArgument(2);
 
     for (size_t index = 0; index < header_count; index++)
     {
@@ -347,9 +372,12 @@ static void setup_httpapi_executerequestasync_POST_mocks(size_t header_count)
     EXPECTED_CALL(STRING_concat(IGNORED_NUM_ARG, IGNORED_NUM_ARG));
     EXPECTED_CALL(gballoc_free(IGNORED_PTR_ARG));
 
-    EXPECTED_CALL(gballoc_malloc(IGNORED_NUM_ARG));
-    EXPECTED_CALL(STRING_concat(IGNORED_PTR_ARG, IGNORED_PTR_ARG));
-    EXPECTED_CALL(gballoc_free(IGNORED_PTR_ARG));
+    if (content_len_included)
+    {
+        EXPECTED_CALL(gballoc_malloc(IGNORED_NUM_ARG));
+        EXPECTED_CALL(STRING_concat(IGNORED_PTR_ARG, IGNORED_PTR_ARG));
+        EXPECTED_CALL(gballoc_free(IGNORED_PTR_ARG));
+    }
 
     EXPECTED_CALL(STRING_concat(IGNORED_PTR_ARG, IGNORED_PTR_ARG));
     EXPECTED_CALL(STRING_c_str(IGNORED_PTR_ARG));
@@ -360,14 +388,17 @@ static void setup_httpapi_executerequestasync_POST_mocks(size_t header_count)
         .IgnoreArgument(5);
     EXPECTED_CALL(STRING_delete(IGNORED_PTR_ARG));
     EXPECTED_CALL(gballoc_free(IGNORED_PTR_ARG));
-    STRICT_EXPECTED_CALL(xio_send(TEST_IO_HANDLE, IGNORED_PTR_ARG, IGNORED_NUM_ARG, IGNORED_NUM_ARG, IGNORED_PTR_ARG))
-        .IgnoreArgument(2)
-        .IgnoreArgument(3)
-        .IgnoreArgument(4)
-        .IgnoreArgument(5);
+    if (include_content)
+    {
+        STRICT_EXPECTED_CALL(xio_send(TEST_IO_HANDLE, IGNORED_PTR_ARG, IGNORED_NUM_ARG, IGNORED_NUM_ARG, IGNORED_PTR_ARG))
+            .IgnoreArgument(2)
+            .IgnoreArgument(3)
+            .IgnoreArgument(4)
+            .IgnoreArgument(5);
+    }
 }
 
-static void setup_httpapi_on_bytes_recv_GET_mocks(size_t header_count)
+static void setup_httpapi_on_bytes_recv_mocks(size_t header_count, bool has_content)
 {
     STRICT_EXPECTED_CALL(HTTPHeaders_Alloc());
     STRICT_EXPECTED_CALL(BUFFER_new());
@@ -385,9 +416,12 @@ static void setup_httpapi_on_bytes_recv_GET_mocks(size_t header_count)
     }
     EXPECTED_CALL(gballoc_malloc(IGNORED_NUM_ARG));
     EXPECTED_CALL(gballoc_free(IGNORED_PTR_ARG));
-    EXPECTED_CALL(BUFFER_build(IGNORED_PTR_ARG, IGNORED_PTR_ARG, IGNORED_NUM_ARG));
-    EXPECTED_CALL(CONSTBUFFER_CreateFromBuffer(IGNORED_PTR_ARG));
-    EXPECTED_CALL(CONSTBUFFER_Destroy(IGNORED_PTR_ARG));
+    if (has_content)
+    {
+        EXPECTED_CALL(BUFFER_build(IGNORED_PTR_ARG, IGNORED_PTR_ARG, IGNORED_NUM_ARG));
+        EXPECTED_CALL(CONSTBUFFER_CreateFromBuffer(IGNORED_PTR_ARG));
+        EXPECTED_CALL(CONSTBUFFER_Destroy(IGNORED_PTR_ARG));
+    }
     EXPECTED_CALL(HTTPHeaders_Free(IGNORED_PTR_ARG));
     EXPECTED_CALL(BUFFER_delete(IGNORED_PTR_ARG));
     EXPECTED_CALL(gballoc_free(IGNORED_PTR_ARG));
@@ -462,16 +496,7 @@ TEST_FUNCTION(httpapi_createconnection_hostname_too_long_fail)
 TEST_FUNCTION(httpapi_createconnection_succeed)
 {
     //arrange
-    EXPECTED_CALL(gballoc_malloc(IGNORED_NUM_ARG));
-    STRICT_EXPECTED_CALL(mallocAndStrcpy_s(IGNORED_NUM_ARG, TEST_HOSTNAME))
-        .IgnoreArgument(1);
-    STRICT_EXPECTED_CALL(xio_open(TEST_IO_HANDLE, IGNORED_PTR_ARG, IGNORED_PTR_ARG, IGNORED_PTR_ARG, IGNORED_PTR_ARG, IGNORED_PTR_ARG, IGNORED_PTR_ARG))
-        .IgnoreArgument(2)
-        .IgnoreArgument(3)
-        .IgnoreArgument(4)
-        .IgnoreArgument(5)
-        .IgnoreArgument(6)
-        .IgnoreArgument(7);
+    setup_httpapi_createconnection_mocks();
 
     //act
     HTTP_HANDLE http_handle = HTTPAPI_CreateConnection(TEST_IO_HANDLE, TEST_HOSTNAME, DEFAULT_HTTP_SECURE_PORT);
@@ -493,15 +518,7 @@ TEST_FUNCTION(httpapi_createconnection_failures)
     int negativeTestsInitResult = umock_c_negative_tests_init();
     ASSERT_ARE_EQUAL(int, 0, negativeTestsInitResult);
 
-    EXPECTED_CALL(gballoc_malloc(IGNORED_NUM_ARG)).IgnoreArgument_size();
-    STRICT_EXPECTED_CALL(mallocAndStrcpy_s(IGNORED_NUM_ARG, TEST_HOSTNAME)).IgnoreArgument_destination();
-    STRICT_EXPECTED_CALL(xio_open(TEST_IO_HANDLE, IGNORED_PTR_ARG, IGNORED_PTR_ARG, IGNORED_PTR_ARG, IGNORED_PTR_ARG, IGNORED_PTR_ARG, IGNORED_PTR_ARG))
-        .IgnoreArgument(2)
-        .IgnoreArgument(3)
-        .IgnoreArgument(4)
-        .IgnoreArgument(5)
-        .IgnoreArgument(6)
-        .IgnoreArgument(7);
+    setup_httpapi_createconnection_mocks();
 
     umock_c_negative_tests_snapshot();
 
@@ -543,7 +560,7 @@ TEST_FUNCTION(httpapi_closeconnection_succeed)
     HTTP_HANDLE handle = HTTPAPI_CreateConnection(TEST_IO_HANDLE, TEST_HOSTNAME, DEFAULT_HTTP_SECURE_PORT);
     umock_c_reset_all_calls();
 
-    EXPECTED_CALL(xio_close(TEST_IO_HANDLE, IGNORED_PTR_ARG, IGNORED_PTR_ARG));
+    STRICT_EXPECTED_CALL(xio_close(TEST_IO_HANDLE, IGNORED_PTR_ARG, IGNORED_PTR_ARG)).IgnoreArgument(2).IgnoreArgument(2);
     EXPECTED_CALL(gballoc_free(IGNORED_PTR_ARG));
     EXPECTED_CALL(gballoc_free(IGNORED_PTR_ARG));
 
@@ -589,7 +606,7 @@ TEST_FUNCTION(httpapi_executerequestasync_relativePath_NULL_fail)
     HTTPAPI_CloseConnection(handle);
 }
 
-/* Tests_SRS_HTTPAPI_07_010: [If the parameters content is not NULL and contentLength is 0 or content is NULL and contentLength is not 0, HTTPAPI_ExecuteRequestAsync shall return HTTPAPI_INVALID_ARG.] */
+/* Tests_SRS_HTTPAPI_07_010: [If the parameters content is NULL and contentLength is not 0, HTTPAPI_ExecuteRequestAsync shall return HTTPAPI_INVALID_ARG.] */
 TEST_FUNCTION(httpapi_executerequestasync_content_NULL_contentLength_valid_fail)
 {
     //arrange
@@ -598,24 +615,6 @@ TEST_FUNCTION(httpapi_executerequestasync_content_NULL_contentLength_valid_fail)
 
     //act
     HTTPAPI_RESULT http_result = HTTPAPI_ExecuteRequestAsync(handle, HTTPAPI_REQUEST_GET, TEST_RELATIVE_PATH, NULL, NULL, TEXT_CONTENT_LENGTH, my_on_execute_complete, NULL);
-
-    //assert
-    ASSERT_ARE_EQUAL(HTTPAPI_RESULT, HTTPAPI_INVALID_ARG, http_result);
-    ASSERT_ARE_EQUAL(char_ptr, umock_c_get_expected_calls(), umock_c_get_actual_calls());
-
-    // Cleanup
-    HTTPAPI_CloseConnection(handle);
-}
-
-/* Tests_SRS_HTTPAPI_07_010: [If the parameters content is not NULL and contentLength is 0 or content is NULL and contentLength is not 0, HTTPAPI_ExecuteRequestAsync shall return HTTPAPI_INVALID_ARG.] */
-TEST_FUNCTION(httpapi_executerequestasync_content_valid_contentLength_0_fail)
-{
-    //arrange
-    HTTP_HANDLE handle = HTTPAPI_CreateConnection(TEST_IO_HANDLE, TEST_HOSTNAME, DEFAULT_HTTP_SECURE_PORT);
-    umock_c_reset_all_calls();
-
-    //act
-    HTTPAPI_RESULT http_result = HTTPAPI_ExecuteRequestAsync(handle, HTTPAPI_REQUEST_GET, TEST_RELATIVE_PATH, NULL, TEST_HTTP_CONTENT, 0, my_on_execute_complete, NULL);
 
     //assert
     ASSERT_ARE_EQUAL(HTTPAPI_RESULT, HTTPAPI_INVALID_ARG, http_result);
@@ -718,29 +717,7 @@ TEST_FUNCTION(httpapi_executerequestasync_GET_content_len_request_included_succe
     umock_c_reset_all_calls();
 
     g_header_count = 4;
-
-    EXPECTED_CALL(gballoc_malloc(IGNORED_NUM_ARG));
-    EXPECTED_CALL(STRING_construct(IGNORED_NUM_ARG));
-    STRICT_EXPECTED_CALL(HTTPHeaders_GetHeaderCount(TEST_HEADER_HANDLE, IGNORED_PTR_ARG)).IgnoreArgument(2);
-
-    for (size_t index = 0; index < g_header_count; index++)
-    {
-        EXPECTED_CALL(HTTPHeaders_GetHeader(TEST_HEADER_HANDLE, 0, IGNORED_PTR_ARG));
-        EXPECTED_CALL(gballoc_malloc(IGNORED_NUM_ARG));
-        EXPECTED_CALL(STRING_concat(IGNORED_NUM_ARG, IGNORED_NUM_ARG));
-        EXPECTED_CALL(gballoc_free(IGNORED_PTR_ARG));
-        EXPECTED_CALL(gballoc_free(IGNORED_PTR_ARG));
-    }
-
-    EXPECTED_CALL(STRING_concat(IGNORED_PTR_ARG, IGNORED_PTR_ARG));
-    EXPECTED_CALL(STRING_c_str(IGNORED_PTR_ARG));
-    STRICT_EXPECTED_CALL(xio_send(TEST_IO_HANDLE, IGNORED_PTR_ARG, IGNORED_NUM_ARG, IGNORED_NUM_ARG, IGNORED_PTR_ARG))
-        .IgnoreArgument(2)
-        .IgnoreArgument(3)
-        .IgnoreArgument(4)
-        .IgnoreArgument(5);
-    EXPECTED_CALL(STRING_delete(IGNORED_PTR_ARG));
-    EXPECTED_CALL(gballoc_free(IGNORED_PTR_ARG));
+    setup_httpapi_executerequestasync_with_header_mocks(g_header_count, false, false);
 
     //act
     HTTPAPI_RESULT http_result = HTTPAPI_ExecuteRequestAsync(handle, HTTPAPI_REQUEST_GET, TEST_RELATIVE_PATH, TEST_HEADER_HANDLE, NULL, 0, my_on_execute_complete, NULL);
@@ -761,29 +738,7 @@ TEST_FUNCTION(httpapi_executerequestasync_GET_host_request_included_succeed)
     umock_c_reset_all_calls();
 
     g_header_count = 3;
-
-    EXPECTED_CALL(gballoc_malloc(IGNORED_NUM_ARG));
-    EXPECTED_CALL(STRING_construct(IGNORED_NUM_ARG));
-    EXPECTED_CALL(HTTPHeaders_GetHeaderCount(TEST_HEADER_HANDLE, IGNORED_PTR_ARG));
-
-    for (size_t index = 0; index < g_header_count; index++)
-    {
-        EXPECTED_CALL(HTTPHeaders_GetHeader(TEST_HEADER_HANDLE, 0, IGNORED_PTR_ARG));
-        EXPECTED_CALL(gballoc_malloc(IGNORED_NUM_ARG));
-        EXPECTED_CALL(STRING_concat(IGNORED_NUM_ARG, IGNORED_NUM_ARG));
-        EXPECTED_CALL(gballoc_free(IGNORED_PTR_ARG));
-        EXPECTED_CALL(gballoc_free(IGNORED_PTR_ARG));
-    }
-
-    EXPECTED_CALL(STRING_concat(IGNORED_PTR_ARG, IGNORED_PTR_ARG));
-    EXPECTED_CALL(STRING_c_str(IGNORED_PTR_ARG));
-    STRICT_EXPECTED_CALL(xio_send(TEST_IO_HANDLE, IGNORED_PTR_ARG, IGNORED_NUM_ARG, IGNORED_NUM_ARG, IGNORED_PTR_ARG))
-        .IgnoreArgument(2)
-        .IgnoreArgument(3)
-        .IgnoreArgument(4)
-        .IgnoreArgument(5);
-    EXPECTED_CALL(STRING_delete(IGNORED_PTR_ARG));
-    EXPECTED_CALL(gballoc_free(IGNORED_PTR_ARG));
+    setup_httpapi_executerequestasync_with_header_mocks(g_header_count, false, false);
 
     //act
     HTTPAPI_RESULT http_result = HTTPAPI_ExecuteRequestAsync(handle, HTTPAPI_REQUEST_GET, TEST_RELATIVE_PATH, TEST_HEADER_HANDLE, NULL, 0, my_on_execute_complete, NULL);
@@ -918,7 +873,6 @@ TEST_FUNCTION(httpapi_executerequestasync_HEAD_type_failures)
     HTTPAPI_CloseConnection(handle);
 }
 
-
 /* Tests_SRS_HTTPAPI_07_022: [HTTPAPI_ExecuteRequestAsync shall support all valid HTTP request types (rfc7231 4.3).] */
 /* Tests_SRS_HTTPAPI_07_012: [HTTPAPI_ExecuteRequestAsync shall add the Content-Length http header to the request if not supplied and the length of the content is > 0 or the requestType is a POST (rfc7230 3.3.2).] */
 /* Tests_SRS_HTTPAPI_07_011: [If the requestType parameter is of type POST and the Content-Length not supplied HTTPAPI_ExecuteRequestAsync shall add the Content-Length header (rfc7230 3.3.2).] */
@@ -929,7 +883,7 @@ TEST_FUNCTION(httpapi_executerequestasync_POST_succeed)
     umock_c_reset_all_calls();
 
     g_header_count = 1;
-    setup_httpapi_executerequestasync_POST_mocks(g_header_count);
+    setup_httpapi_executerequestasync_with_header_mocks(g_header_count, true, true);
 
     //act
     HTTPAPI_RESULT http_result = HTTPAPI_ExecuteRequestAsync(handle, HTTPAPI_REQUEST_POST, TEST_RELATIVE_PATH, TEST_HEADER_HANDLE, TEST_HTTP_CONTENT, TEXT_CONTENT_LENGTH, my_on_execute_complete, NULL);
@@ -954,7 +908,7 @@ TEST_FUNCTION(httpapi_executerequestasync_POST_failure)
     umock_c_reset_all_calls();
 
     g_header_count = 1;
-    setup_httpapi_executerequestasync_POST_mocks(g_header_count);
+    setup_httpapi_executerequestasync_with_header_mocks(g_header_count, true, true);
 
     umock_c_negative_tests_snapshot();
 
@@ -994,34 +948,8 @@ TEST_FUNCTION(httpapi_executerequestasync_DELETE_succeed)
     HTTP_HANDLE handle = HTTPAPI_CreateConnection(TEST_IO_HANDLE, TEST_HOSTNAME, 8080);
     umock_c_reset_all_calls();
 
-    /*EXPECTED_CALL(gballoc_malloc(IGNORED_NUM_ARG));
-    EXPECTED_CALL(STRING_construct(IGNORED_NUM_ARG));
-
-    STRICT_EXPECTED_CALL(HTTPHeaders_GetHeaderCount(TEST_HEADER_HANDLE, IGNORED_NUM_ARG)).IgnoreArgument(2);
-    EXPECTED_CALL(gballoc_malloc(IGNORED_NUM_ARG));
-    EXPECTED_CALL(STRING_concat(IGNORED_NUM_ARG, IGNORED_NUM_ARG));
-    EXPECTED_CALL(gballoc_free(IGNORED_PTR_ARG));
-
-    EXPECTED_CALL(gballoc_malloc(IGNORED_NUM_ARG));
-    EXPECTED_CALL(STRING_concat(IGNORED_NUM_ARG, IGNORED_NUM_ARG));
-    EXPECTED_CALL(gballoc_free(IGNORED_PTR_ARG));
-    EXPECTED_CALL(STRING_concat(IGNORED_PTR_ARG, IGNORED_PTR_ARG));
-    EXPECTED_CALL(STRING_c_str(IGNORED_PTR_ARG));
-    STRICT_EXPECTED_CALL(xio_send(TEST_IO_HANDLE, IGNORED_PTR_ARG, IGNORED_NUM_ARG, IGNORED_NUM_ARG, IGNORED_PTR_ARG))
-        .IgnoreArgument(2)
-        .IgnoreArgument(3)
-        .IgnoreArgument(4)
-        .IgnoreArgument(5);
-    EXPECTED_CALL(STRING_delete(IGNORED_PTR_ARG));
-    EXPECTED_CALL(gballoc_free(IGNORED_PTR_ARG));
-    STRICT_EXPECTED_CALL(xio_send(TEST_IO_HANDLE, IGNORED_PTR_ARG, IGNORED_NUM_ARG, IGNORED_NUM_ARG, IGNORED_PTR_ARG))
-        .IgnoreArgument(2)
-        .IgnoreArgument(3)
-        .IgnoreArgument(4)
-        .IgnoreArgument(5);*/
-
     g_header_count = 0;
-    setup_httpapi_executerequestasync_POST_mocks(g_header_count);
+    setup_httpapi_executerequestasync_with_header_mocks(g_header_count, true, true);
 
     //act
     HTTPAPI_RESULT http_result = HTTPAPI_ExecuteRequestAsync(handle, HTTPAPI_REQUEST_DELETE, TEST_RELATIVE_PATH, TEST_HEADER_HANDLE, TEST_HTTP_CONTENT, TEXT_CONTENT_LENGTH, my_on_execute_complete, NULL);
@@ -1043,36 +971,7 @@ TEST_FUNCTION(httpapi_executerequestasync_PUT_succeed)
     umock_c_reset_all_calls();
 
     g_header_count = 3;
-    EXPECTED_CALL(gballoc_malloc(IGNORED_NUM_ARG));
-    EXPECTED_CALL(STRING_construct(IGNORED_NUM_ARG));
-    STRICT_EXPECTED_CALL(HTTPHeaders_GetHeaderCount(TEST_HEADER_HANDLE, IGNORED_PTR_ARG)).IgnoreArgument(2);
-
-    for (size_t index = 0; index < g_header_count; index++)
-    {
-        EXPECTED_CALL(HTTPHeaders_GetHeader(TEST_HEADER_HANDLE, 0, IGNORED_PTR_ARG));
-        EXPECTED_CALL(gballoc_malloc(IGNORED_NUM_ARG));
-        EXPECTED_CALL(STRING_concat(IGNORED_NUM_ARG, IGNORED_NUM_ARG));
-        EXPECTED_CALL(gballoc_free(IGNORED_PTR_ARG));
-        EXPECTED_CALL(gballoc_free(IGNORED_PTR_ARG));
-    }
-
-    EXPECTED_CALL(gballoc_malloc(IGNORED_NUM_ARG));
-    EXPECTED_CALL(STRING_concat(IGNORED_PTR_ARG, IGNORED_PTR_ARG));
-    EXPECTED_CALL(gballoc_free(IGNORED_PTR_ARG));
-    EXPECTED_CALL(STRING_concat(IGNORED_PTR_ARG, IGNORED_PTR_ARG));
-    EXPECTED_CALL(STRING_c_str(IGNORED_PTR_ARG));
-    STRICT_EXPECTED_CALL(xio_send(TEST_IO_HANDLE, IGNORED_PTR_ARG, IGNORED_NUM_ARG, IGNORED_NUM_ARG, IGNORED_PTR_ARG))
-        .IgnoreArgument(2)
-        .IgnoreArgument(3)
-        .IgnoreArgument(4)
-        .IgnoreArgument(5);
-    EXPECTED_CALL(STRING_delete(IGNORED_PTR_ARG));
-    EXPECTED_CALL(gballoc_free(IGNORED_PTR_ARG));
-    STRICT_EXPECTED_CALL(xio_send(TEST_IO_HANDLE, IGNORED_PTR_ARG, IGNORED_NUM_ARG, IGNORED_NUM_ARG, IGNORED_PTR_ARG))
-        .IgnoreArgument(2)
-        .IgnoreArgument(3)
-        .IgnoreArgument(4)
-        .IgnoreArgument(5);
+    setup_httpapi_executerequestasync_with_header_mocks(g_header_count, true, true);
 
     //act
     HTTPAPI_RESULT http_result = HTTPAPI_ExecuteRequestAsync(handle, HTTPAPI_REQUEST_PUT, TEST_RELATIVE_PATH, TEST_HEADER_HANDLE, TEST_HTTP_CONTENT, TEXT_CONTENT_LENGTH, my_on_execute_complete, NULL);
@@ -1487,7 +1386,7 @@ TEST_FUNCTION(httpapi_on_bytes_recv_len_0_fail)
     HTTPAPI_CloseConnection(handle);
 }
 
-TEST_FUNCTION(httpapi_on_bytes_recv_GET_request_one_call_succeed)
+TEST_FUNCTION(httpapi_on_bytes_recv_GET_succeed)
 {
     //arrange
     HTTP_HANDLE handle = HTTPAPI_CreateConnection(TEST_IO_HANDLE, TEST_HOSTNAME, DEFAULT_HTTP_SECURE_PORT);
@@ -1498,7 +1397,7 @@ TEST_FUNCTION(httpapi_on_bytes_recv_GET_request_one_call_succeed)
     size_t buffer_len = strlen(TEST_HTTP_GET_BUFFER);
     const unsigned char* buffer = (const unsigned char*)TEST_HTTP_GET_BUFFER;
 
-     setup_httpapi_on_bytes_recv_GET_mocks(8);
+    setup_httpapi_on_bytes_recv_mocks(8, true);
 
     //act
     ASSERT_IS_NOT_NULL(g_on_bytes_recv);
@@ -1514,7 +1413,7 @@ TEST_FUNCTION(httpapi_on_bytes_recv_GET_request_one_call_succeed)
     HTTPAPI_CloseConnection(handle);
 }
 
-TEST_FUNCTION(httpapi_on_bytes_recv_GET_request_one_call_failure)
+TEST_FUNCTION(httpapi_on_bytes_recv_GET_failure)
 {
     //arrange
     int negativeTestsInitResult = umock_c_negative_tests_init();
@@ -1528,11 +1427,11 @@ TEST_FUNCTION(httpapi_on_bytes_recv_GET_request_one_call_failure)
     size_t buffer_len = strlen(TEST_HTTP_GET_BUFFER);
     const unsigned char* buffer = (const unsigned char*)TEST_HTTP_GET_BUFFER;
 
-    setup_httpapi_on_bytes_recv_GET_mocks(8);
+    setup_httpapi_on_bytes_recv_mocks(8, true);
 
     umock_c_negative_tests_snapshot();
 
-    size_t calls_cannot_fail[] ={ 0 };
+    size_t calls_cannot_fail[] = { 0 };
 
     ASSERT_IS_NOT_NULL(g_on_bytes_recv);
     ASSERT_IS_NOT_NULL(g_on_bytes_recv_ctx);
@@ -1556,6 +1455,158 @@ TEST_FUNCTION(httpapi_on_bytes_recv_GET_request_one_call_failure)
 
         //assert
         ASSERT_IS_TRUE(g_execute_complete_called);
+    }
+
+    // Cleanup
+    HTTPAPI_CloseConnection(handle);
+    umock_c_negative_tests_deinit();
+}
+
+TEST_FUNCTION(httpapi_on_bytes_recv_HEAD_succeed)
+{
+    //arrange
+    HTTP_HANDLE handle = HTTPAPI_CreateConnection(TEST_IO_HANDLE, TEST_HOSTNAME, DEFAULT_HTTP_SECURE_PORT);
+    HTTPAPI_RESULT http_result = HTTPAPI_ExecuteRequestAsync(handle, HTTPAPI_REQUEST_HEAD, TEST_RELATIVE_PATH, TEST_HEADER_HANDLE, NULL, 0, my_on_execute_complete, NULL);
+    ASSERT_ARE_EQUAL(HTTPAPI_RESULT, HTTPAPI_OK, http_result);
+    umock_c_reset_all_calls();
+
+    size_t buffer_len = strlen(TEST_HTTP_HEAD_BUFFER);
+    const unsigned char* buffer = (const unsigned char*)TEST_HTTP_HEAD_BUFFER;
+
+    setup_httpapi_on_bytes_recv_mocks(8, false);
+
+    //act
+    ASSERT_IS_NOT_NULL(g_on_bytes_recv);
+    ASSERT_IS_NOT_NULL(g_on_bytes_recv_ctx);
+
+    g_on_bytes_recv(g_on_bytes_recv_ctx, buffer, buffer_len);
+
+    //assert
+    ASSERT_IS_TRUE(g_execute_complete_called);
+    ASSERT_ARE_EQUAL(char_ptr, umock_c_get_expected_calls(), umock_c_get_actual_calls());
+
+    // Cleanup
+    HTTPAPI_CloseConnection(handle);
+}
+
+TEST_FUNCTION(httpapi_on_bytes_recv_HEAD_failures)
+{
+    //arrange
+    int negativeTestsInitResult = umock_c_negative_tests_init();
+    ASSERT_ARE_EQUAL(int, 0, negativeTestsInitResult);
+
+    HTTP_HANDLE handle = HTTPAPI_CreateConnection(TEST_IO_HANDLE, TEST_HOSTNAME, DEFAULT_HTTP_SECURE_PORT);
+    HTTPAPI_RESULT http_result = HTTPAPI_ExecuteRequestAsync(handle, HTTPAPI_REQUEST_HEAD, TEST_RELATIVE_PATH, TEST_HEADER_HANDLE, NULL, 0, my_on_execute_complete, NULL);
+    ASSERT_ARE_EQUAL(HTTPAPI_RESULT, HTTPAPI_OK, http_result);
+    umock_c_reset_all_calls();
+
+    size_t buffer_len = strlen(TEST_HTTP_HEAD_BUFFER);
+    const unsigned char* buffer = (const unsigned char*)TEST_HTTP_HEAD_BUFFER;
+
+    setup_httpapi_on_bytes_recv_mocks(8, false);
+
+    umock_c_negative_tests_snapshot();
+
+//    size_t calls_cannot_fail[] = { 0 };
+
+    ASSERT_IS_NOT_NULL(g_on_bytes_recv);
+    ASSERT_IS_NOT_NULL(g_on_bytes_recv_ctx);
+
+    //act
+    size_t count = umock_c_negative_tests_call_count();
+    for (size_t index = 0; index < count; index++)
+    {
+        /*if (should_skip_index(index, calls_cannot_fail, sizeof(calls_cannot_fail)/sizeof(calls_cannot_fail[0])) != 0)
+        {
+            continue;
+        }*/
+
+        umock_c_negative_tests_reset();
+        umock_c_negative_tests_fail_call(index);
+
+        char tmp_msg[64];
+        sprintf(tmp_msg, "httpapi_on_bytes_recv_GET failure in test %zu", index);
+
+        g_on_bytes_recv(g_on_bytes_recv_ctx, buffer, buffer_len);
+
+        //assert
+        //ASSERT_IS_TRUE(g_execute_complete_called);
+    }
+
+    // Cleanup
+    HTTPAPI_CloseConnection(handle);
+    umock_c_negative_tests_deinit();
+}
+
+TEST_FUNCTION(httpapi_on_bytes_recv_PUT_succeed)
+{
+    //arrange
+    HTTP_HANDLE handle = HTTPAPI_CreateConnection(TEST_IO_HANDLE, TEST_HOSTNAME, DEFAULT_HTTP_SECURE_PORT);
+    HTTPAPI_RESULT http_result = HTTPAPI_ExecuteRequestAsync(handle, HTTPAPI_REQUEST_PUT, TEST_RELATIVE_PATH, TEST_HEADER_HANDLE, NULL, 0, my_on_execute_complete, NULL);
+    ASSERT_ARE_EQUAL(HTTPAPI_RESULT, HTTPAPI_OK, http_result);
+    umock_c_reset_all_calls();
+
+    size_t buffer_len = strlen(TEST_HTTP_PUT_BUFFER);
+    const unsigned char* buffer = (const unsigned char*)TEST_HTTP_PUT_BUFFER;
+
+    setup_httpapi_on_bytes_recv_mocks(5, false);
+
+    //act
+    ASSERT_IS_NOT_NULL(g_on_bytes_recv);
+    ASSERT_IS_NOT_NULL(g_on_bytes_recv_ctx);
+
+    g_on_bytes_recv(g_on_bytes_recv_ctx, buffer, buffer_len);
+
+    //assert
+    ASSERT_IS_TRUE(g_execute_complete_called);
+    ASSERT_ARE_EQUAL(char_ptr, umock_c_get_expected_calls(), umock_c_get_actual_calls());
+
+    // Cleanup
+    HTTPAPI_CloseConnection(handle);
+}
+
+TEST_FUNCTION(httpapi_on_bytes_recv_PUT_failures)
+{
+    //arrange
+    int negativeTestsInitResult = umock_c_negative_tests_init();
+    ASSERT_ARE_EQUAL(int, 0, negativeTestsInitResult);
+
+    HTTP_HANDLE handle = HTTPAPI_CreateConnection(TEST_IO_HANDLE, TEST_HOSTNAME, DEFAULT_HTTP_SECURE_PORT);
+    HTTPAPI_RESULT http_result = HTTPAPI_ExecuteRequestAsync(handle, HTTPAPI_REQUEST_HEAD, TEST_RELATIVE_PATH, TEST_HEADER_HANDLE, NULL, 0, my_on_execute_complete, NULL);
+    ASSERT_ARE_EQUAL(HTTPAPI_RESULT, HTTPAPI_OK, http_result);
+    umock_c_reset_all_calls();
+
+    size_t buffer_len = strlen(TEST_HTTP_PUT_BUFFER);
+    const unsigned char* buffer = (const unsigned char*)TEST_HTTP_PUT_BUFFER;
+
+    setup_httpapi_on_bytes_recv_mocks(5, false);
+
+    umock_c_negative_tests_snapshot();
+
+    //    size_t calls_cannot_fail[] = { 0 };
+
+    ASSERT_IS_NOT_NULL(g_on_bytes_recv);
+    ASSERT_IS_NOT_NULL(g_on_bytes_recv_ctx);
+
+    //act
+    size_t count = umock_c_negative_tests_call_count();
+    for (size_t index = 0; index < count; index++)
+    {
+        /*if (should_skip_index(index, calls_cannot_fail, sizeof(calls_cannot_fail)/sizeof(calls_cannot_fail[0])) != 0)
+        {
+        continue;
+        }*/
+
+        umock_c_negative_tests_reset();
+        umock_c_negative_tests_fail_call(index);
+
+        char tmp_msg[64];
+        sprintf(tmp_msg, "httpapi_on_bytes_recv_PUT failure in test %zu", index);
+
+        g_on_bytes_recv(g_on_bytes_recv_ctx, buffer, buffer_len);
+
+        //assert
+        //ASSERT_IS_TRUE(g_execute_complete_called);
     }
 
     // Cleanup
