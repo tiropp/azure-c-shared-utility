@@ -18,14 +18,17 @@
 #include "azure_c_shared_utility/xlogging.h"
 #include "azure_c_shared_utility/platform.h"
 #include "azure_c_shared_utility/threadapi.h"
-#include "ESP8266WiFi.h"
 
 #ifdef ARDUINO_ARCH_ESP8266
-#include <WiFiClientSecure.h>
+#include "ESP8266WiFi.h"
+#include "WiFiClientSecure.h"
 #elif ARDUINO_SAMD_FEATHER_M0
-#include<Adafruit_WINC1500SSLClient>
+#include "Adafruit_WINC1500.h"
+#include "Adafruit_WINC1500Client.h"
+#include "Adafruit_WINC1500SSLClient.h"
 #else
-#include <WiFiSSLClient>
+#include "WiFi101.h"
+#include "WiFiSSLClient.h"
 #endif
 
 #define IndicateError() { if (_on_io_error != NULL) _on_io_error(_on_io_error_context); }
