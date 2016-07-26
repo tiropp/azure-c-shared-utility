@@ -105,6 +105,10 @@ Vary: Authorization, Accept\r\nAccept-Ranges: bytes\r\nContent-Length: 88\r\nCon
 static const char* TEST_HTTP_POST_BUFFER = "HTTP/1.1 200 OK\r\nDate: Mon, 27 Jul 2009 12:28:53 GMT\r\nServer: Apache/2.2.14 (Win32)\r\nLast-Modified: Wed, 22 Jul 2009 19:15:56 GMT\r\n \
 ETag: \"34aa387-d-1568eb00\"\r\nVary: Authorization,Accept\r\nAccept-Ranges: bytes\r\nContent-Length: 73\r\nContent-Type: text/html\r\nConnection: Closed\r\n\r\n\r\n<html>\r\n<body>\r\n<h1>Request Processed Successfully</h1>\r\n</body>\r\n</html>";
 static const char* TEST_HTTP_PUT_BUFFER = "HTTP/1.1 201 Created\r\nDate: Mon, 27 Jul 2009 12:28:53 GMT\r\nServer: Apache/2.2.14 (Win32)\r\nContent-type: text/html\r\nContent-length: 56\r\nConnection: Closed\r\n\r\n<html><body><h1>The file was created.</h1></body></html>";
+static const char* TEST_HTTP_DELETE_BUFFER = "HTTP/1.1 200 OK\r\nDate: Mon, 27 Jul 2009 12:28:53 GMT\r\nServer: Apache/2.2.14 (Win32)\r\nContent-type: text/html\r\nContent-length: 30\r\nConnection: Closed\r\n\r\n<html><body><h1>URL deleted.</h1></body></html>";
+static const char* TEST_HTTP_CONNECT_BUFFER = "HTTP/1.1 200 Connection established\r\nDate: Mon, 27 Jul 2009 12:28:53 GMT\r\nServer: Apache/2.2.14 (Win32)";
+static const char* TEST_HTTP_OPTIONS_BUFFER = "HTTP/1.1 200 OK\r\nDate: Mon, 27 Jul 2009 12:28:53 GMT\r\nServer: Apache/2.2.14 (Win32)\r\nAllow: GET, HEAD, POST, OPTIONS, TRACE\r\nContent-Type: httpd/unix-directory";
+static const char* TEST_HTTP_TRACE_BUFFER = "";
 
 static HTTP_HEADERS_HANDLE my_HTTPHeaders_Alloc(void)
 {
