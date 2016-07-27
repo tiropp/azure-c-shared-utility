@@ -78,8 +78,6 @@ static size_t URL_PrintableChar(char charVal, char* buffer)
         }
     }
 
-    buffer[size] = '\0';
-
     return size;
 }
 
@@ -164,7 +162,14 @@ STRING_HANDLE URL_Encode(STRING_HANDLE input)
                 currentUnsignedChar = (unsigned char)(*currentInput++);
                 currentEncodePosition += URL_PrintableChar(currentUnsignedChar, &encodedURL[currentEncodePosition]);
             } while (currentUnsignedChar != 0);
+			encodedURL[currentEncodePosition] = '\0';
+
             result = STRING_new_with_memory(encodedURL);
+			if (result == NULL)
+			{
+				LogError("URL_Encode:: MALLOC failure on encode.");
+				free(encodedURL);
+			}
         }
     }
     return result;

@@ -11,6 +11,7 @@
 #include <stddef.h>
 #include <stdio.h>
 #include <string.h>
+#include <cstddef>
 #include "tlsio_arduino.h"
 #include "azure_c_shared_utility/tlsio.h"
 #include "azure_c_shared_utility/xio.h"
@@ -31,190 +32,52 @@
 #include "WiFiSSLClient.h"
 #endif
 
-#define IndicateError() { if (_on_io_error != NULL) _on_io_error(_on_io_error_context); }
+#define MAX_TLS_OPENING_RETRY  10
+#define MAX_TLS_CLOSING_RETRY  10
+#define RECEIVE_BUFFER_SIZE    128
 
-ArduinoTLS::ArduinoTLS()
+#define IndicateError() do { if (_on_io_error != NULL) _on_io_error(_on_io_error_context); } while(0)
+
+typedef enum IO_STATE_TAG
 {
-#ifdef ARDUINO_ARCH_ESP8266
-    _sslClient = (Client*)new WiFiClientSecure(); // for ESP8266
-#elif ARDUINO_SAMD_FEATHER_M0
-    _sslClient = (Client*)new Adafruit_WINC1500SSLClient(); // for Adafruit WINC1500
-#else
-    _sslClient = (Client*)new WiFiSSLClient();
-#endif
+	IO_STATE_CLOSED,
+	IO_STATE_OPENING,
+	IO_STATE_OPEN,
+	IO_STATE_CLOSING,
+	IO_STATE_ERROR
+} IO_STATE;
 
-    if (_sslClient == NULL)
-    {
-        LogError("Invalid SSL client");
-    }
-    else
-    {
-        _sslClient->setTimeout(10000);
-    }
-
-    _port = 0;
-    _on_bytes_received = NULL;
-    _on_io_error = NULL;
-    _on_bytes_received_context = NULL;
-    _on_io_error_context = NULL;
-    _io_state = IO_STATE_CLOSED;
-}
-
-bool ArduinoTLS::Create(void* io_create_parameters)
+typedef struct ArduinoTLS_tag
 {
-    bool result = false;
-    if (io_create_parameters == NULL)
-    {
-        LogError("Invalid TLS parameters");
-    }
-    else if (_sslClient != NULL)
-    {
-        TLSIO_CONFIG* tlsio_config = (TLSIO_CONFIG*)io_create_parameters;
+	Client* sslClient;
 
-        if (WiFi.hostByName(tlsio_config->hostname, _remote_addr))
-        {
-            LogInfo("WiFi convert %s in %d.%d.%d.%d", tlsio_config->hostname, _remote_addr[0], _remote_addr[1], _remote_addr[2], _remote_addr[3]);
-            _port = tlsio_config->port;
-            result = true;
-        }
-        else
-        {
-            LogError("Host %s not found", tlsio_config->hostname);
-        }
-    }
-    return result;
-}
+	ON_IO_OPEN_COMPLETE on_io_open_complete;
+	void* on_io_open_complete_context;
 
-ArduinoTLS::~ArduinoTLS()
-{
-    if (_sslClient != NULL)
-    {
-        delete(_sslClient);
-        _sslClient = NULL;
-    }
-}
+	ON_BYTES_RECEIVED on_bytes_received;
+	void* on_bytes_received_context;
 
-int ArduinoTLS::Open(
-    ON_IO_OPEN_COMPLETE on_io_open_complete, void* on_io_open_complete_context,
-    ON_BYTES_RECEIVED on_bytes_received, void* on_bytes_received_context,
-    ON_IO_ERROR on_io_error, void* on_io_error_context)
-{
-    int result = __LINE__;
+	ON_IO_ERROR on_io_error;
+	void* on_io_error_context;
 
-    if (_sslClient != NULL)
-    {
-        if (_sslClient->connected())
-        {
-            LogError("No HTTPS clients available");
-        }
+	ON_IO_CLOSE_COMPLETE on_io_close_complete;
+	void* on_io_close_complete_context;
 
-        if (_sslClient->connect(_remote_addr, _port))
-        {
-            while (!_sslClient->connected());
-            _on_bytes_received = on_bytes_received;
-            _on_bytes_received_context = on_bytes_received_context;
-
-            _on_io_error = on_io_error;
-            _on_io_error_context = on_io_error_context;
-
-            _io_state = IO_STATE_OPEN;
-
-            if (on_io_open_complete != NULL)
-            {
-                on_io_open_complete(on_io_open_complete_context, IO_OPEN_OK);
-            }
-
-            result = 0;
-        }
-    }
-    return result;
-}
-
-int ArduinoTLS::Close()
-{
-    int result = __LINE__;
-
-    if (_sslClient != NULL)
-    {
-        _sslClient->stop();
-        result = 0;
-    }
-    return result;
-}
-
-int ArduinoTLS::Send(const void* buffer, size_t size, ON_SEND_COMPLETE on_send_complete, void* callback_context)
-{
-    int result = __LINE__;
-
-    if ((_sslClient != NULL) &&
-        (buffer != NULL) &&
-        (size != 0) &&
-        (_io_state == IO_STATE_OPEN))
-    {
-        size_t send_result = 0;
-        size_t send_size = size;
-        const uint8_t* runBuffer = (const uint8_t *)buffer;
-        while (1)
-        {
-            send_result = _sslClient->write(runBuffer, send_size);
-            if (send_result == send_size) /* Transmit it all. */
-            {
-                result = 0;
-                if (on_send_complete != NULL)
-                {
-                    on_send_complete(callback_context, IO_SEND_OK);
-                }
-                break;
-            }
-            else if (send_result == 0) /* Don't transmit anything! Fail. */
-            {
-                result = __LINE__;
-                break;
-            }
-            else /* Still have buffer to transmit. */
-            {
-                runBuffer += send_result;
-                send_size -= send_result;
-                ThreadAPI_Sleep(1);
-            }
-        } 
-    }
-
-    return result;
-}
+	IPAddress remote_addr;
+	int port;
+	IO_STATE io_state;
+	int countTry;
+} ArduinoTLS;
 
 
-void ArduinoTLS::Dowork(void)
-{
-    uint8_t RecvBuffer[MBED_RECEIVE_BYTES_VALUE];
-
-    if (_sslClient != NULL)
-    {
-        if (_io_state == IO_STATE_OPEN)
-        {
-            int received = 1;
-            while (received > 0)
-            {
-                received = _sslClient->read((uint8_t*)RecvBuffer, MBED_RECEIVE_BYTES_VALUE);
-                if (received > 0)
-                {
-                    if (_on_bytes_received != NULL)
-                    {
-                        // explictly ignoring here the result of the callback
-                        (void)_on_bytes_received(_on_bytes_received_context, RecvBuffer, received);
-                    }
-                }
-            }
-        }
-    }
-}
-
-#ifdef __cplusplus
-extern "C" {
-#include <cstddef>
-#else
-#include <stddef.h>
-#endif /* __cplusplus */
+MOCKABLE_FUNCTION(, CONCRETE_IO_HANDLE, tlsio_arduino_create, void*, io_create_parameters);
+MOCKABLE_FUNCTION(, void, tlsio_arduino_destroy, CONCRETE_IO_HANDLE, tls_io);
+MOCKABLE_FUNCTION(, int, tlsio_arduino_open, CONCRETE_IO_HANDLE, tls_io, ON_IO_OPEN_COMPLETE, on_io_open_complete, void*, on_io_open_complete_context, ON_BYTES_RECEIVED, on_bytes_received, void*, on_bytes_received_context, ON_IO_ERROR, on_io_error, void*, on_io_error_context);
+MOCKABLE_FUNCTION(, int, tlsio_arduino_close, CONCRETE_IO_HANDLE, tls_io, ON_IO_CLOSE_COMPLETE, on_io_close_complete, void*, callback_context);
+MOCKABLE_FUNCTION(, int, tlsio_arduino_send, CONCRETE_IO_HANDLE, tls_io, const void*, buffer, size_t, size, ON_SEND_COMPLETE, on_send_complete, void*, callback_context);
+MOCKABLE_FUNCTION(, void, tlsio_arduino_dowork, CONCRETE_IO_HANDLE, tls_io);
+MOCKABLE_FUNCTION(, int, tlsio_arduino_setoption, CONCRETE_IO_HANDLE, tls_io, const char*, optionName, const void*, value);
+MOCKABLE_FUNCTION(, OPTIONHANDLER_HANDLE, tlsio_arduino_retrieveoptions, CONCRETE_IO_HANDLE, tls_io);
 
 static const IO_INTERFACE_DESCRIPTION tlsio_handle_interface_description =
 {
@@ -230,22 +93,57 @@ static const IO_INTERFACE_DESCRIPTION tlsio_handle_interface_description =
 
 CONCRETE_IO_HANDLE tlsio_arduino_create(void* io_create_parameters)
 {
-    ArduinoTLS* tlsio_instance = new ArduinoTLS();
+	ArduinoTLS* tlsio_instance;
+	if (io_create_parameters == NULL)
+	{
+		LogError("Invalid TLS parameters");
+		tlsio_instance = NULL;
+	}
+	else
+	{
+		tlsio_instance = (ArduinoTLS*)malloc(sizeof(ArduinoTLS));
+		if (tlsio_instance == NULL)
+		{
+			LogError("Create TLS instance failed, there is not enough memory.");
+		}
+		else
+		{
+#ifdef ARDUINO_ARCH_ESP8266
+			tlsio_instance->sslClient = new WiFiClientSecure(); // for ESP8266
+#elif ARDUINO_SAMD_FEATHER_M0
+			tlsio_instance->sslClient = new Adafruit_WINC1500SSLClient(); // for Adafruit WINC1500
+#else
+			tlsio_instance->sslClient = new WiFiSSLClient();
+#endif
 
-    if (tlsio_instance == NULL)
-    {
-        LogError("Create TLSIO instance failed");
-    }
-    else
-    {
-        if (!tlsio_instance->Create(io_create_parameters))
-        {
-            LogError("Create TLSIO failed");
-            delete tlsio_instance;
-            tlsio_instance = NULL;
-        }
-    }
-    return (CONCRETE_IO_HANDLE)tlsio_instance;
+			tlsio_instance->sslClient->setTimeout(10000);
+
+			tlsio_instance->on_io_open_complete = NULL;
+			tlsio_instance->on_io_open_complete_context = NULL;
+			tlsio_instance->on_bytes_received = NULL;
+			tlsio_instance->on_bytes_received_context = NULL;
+			tlsio_instance->on_io_error = NULL;
+			tlsio_instance->on_io_error_context = NULL;
+			tlsio_instance->on_io_close_complete = NULL;
+			tlsio_instance->on_io_close_complete_context = NULL;
+			tlsio_instance->io_state = IO_STATE_CLOSED;
+
+			TLSIO_CONFIG* tlsio_config = (TLSIO_CONFIG*)io_create_parameters;
+
+			if (WiFi.hostByName(tlsio_config->hostname, tlsio_instance->remote_addr))
+			{
+				LogInfo("WiFi converted %s in %d.%d.%d.%d", tlsio_config->hostname, tlsio_instance->remote_addr[0], tlsio_instance->remote_addr[1], tlsio_instance->remote_addr[2], tlsio_instance->remote_addr[3]);
+				tlsio_instance->port = tlsio_config->port;
+			}
+			else
+			{
+				LogError("Host %s not found", tlsio_config->hostname);
+				free(tlsio_instance);
+				tlsio_instance = NULL;
+			}
+		}
+	}
+	return (CONCRETE_IO_HANDLE)tlsio_instance;
 }
 
 void tlsio_arduino_destroy(CONCRETE_IO_HANDLE tlsio_handle)
@@ -254,8 +152,9 @@ void tlsio_arduino_destroy(CONCRETE_IO_HANDLE tlsio_handle)
         return;
 
     ArduinoTLS* tlsio_instance = (ArduinoTLS*)tlsio_handle;
-    delete tlsio_instance;
-    tlsio_instance = NULL;
+
+	delete tlsio_instance->sslClient;
+    free(tlsio_instance);
 }
 
 int tlsio_arduino_open(
@@ -270,8 +169,54 @@ int tlsio_arduino_open(
     if (tlsio_handle == NULL)
         return __LINE__;
 
-    ArduinoTLS* tlsio_instance = (ArduinoTLS*)tlsio_handle;
-    return tlsio_instance->Open(on_io_open_complete, on_io_open_complete_context, on_bytes_received, on_bytes_received_context, on_io_error, on_io_error_context);
+	int result;
+	ArduinoTLS* tlsio_instance = (ArduinoTLS*)tlsio_handle;
+
+	tlsio_instance->on_io_open_complete = on_io_open_complete;
+	tlsio_instance->on_io_open_complete_context = on_io_open_complete_context;
+
+	tlsio_instance->on_bytes_received = on_bytes_received;
+	tlsio_instance->on_bytes_received_context = on_bytes_received_context;
+
+	tlsio_instance->on_io_error = on_io_error;
+	tlsio_instance->on_io_error_context = on_io_error_context;
+
+	if (tlsio_instance->sslClient->connected())
+	{
+		LogError("No TLS clients available");
+		tlsio_instance->io_state = IO_STATE_ERROR;
+		result = __LINE__;
+	}
+	else if (tlsio_instance->sslClient->connect(tlsio_instance->remote_addr, tlsio_instance->port))
+	{
+		tlsio_instance->io_state = IO_STATE_OPENING;
+		tlsio_instance->countTry = MAX_TLS_OPENING_RETRY;
+		result = 0;
+	}
+	else
+	{
+		LogError("TLS connect failed");
+		tlsio_instance->io_state = IO_STATE_ERROR;
+		result = __LINE__;
+	}
+
+	if (result != 0)
+	{
+		if (tlsio_instance->on_io_open_complete != NULL)
+		{
+			(void)tlsio_instance->on_io_open_complete(tlsio_instance->on_io_open_complete_context, IO_OPEN_ERROR);
+		}
+		if (tlsio_instance->on_io_error != NULL)
+		{
+			(void)tlsio_instance->on_io_error(tlsio_instance->on_io_error_context);
+		}
+	}
+	else
+	{
+		tlsio_arduino_dowork(tlsio_handle);
+	}
+
+	return result;
 }
 
 int tlsio_arduino_close(CONCRETE_IO_HANDLE tlsio_handle, ON_IO_CLOSE_COMPLETE on_io_close_complete, void* callback_context)
@@ -279,17 +224,85 @@ int tlsio_arduino_close(CONCRETE_IO_HANDLE tlsio_handle, ON_IO_CLOSE_COMPLETE on
     if (tlsio_handle == NULL)
         return __LINE__;
 
-    ArduinoTLS* tlsio_instance = (ArduinoTLS*)tlsio_handle;
-    return tlsio_instance->Close();
+	int result;
+	ArduinoTLS* tlsio_instance = (ArduinoTLS*)tlsio_handle;
+
+	tlsio_instance->on_io_close_complete = on_io_close_complete;
+	tlsio_instance->on_io_close_complete_context = callback_context;
+
+	if ((tlsio_instance->io_state == IO_STATE_CLOSED) || (tlsio_instance->io_state == IO_STATE_ERROR))
+	{
+		tlsio_instance->io_state = IO_STATE_ERROR;
+		result = __LINE__;
+		if (tlsio_instance->on_io_close_complete != NULL)
+		{
+			(void)tlsio_instance->on_io_close_complete(tlsio_instance->on_io_close_complete_context);
+		}
+		if (tlsio_instance->on_io_error != NULL)
+		{
+			(void)tlsio_instance->on_io_error(tlsio_instance->on_io_error_context);
+		}
+	}
+	else
+	{
+		tlsio_instance->sslClient->stop();
+		tlsio_instance->io_state = IO_STATE_CLOSING;
+		tlsio_instance->countTry = MAX_TLS_CLOSING_RETRY;
+		result = 0;
+		tlsio_arduino_dowork(tlsio_handle);
+	}
+	return result;
 }
 
 int tlsio_arduino_send(CONCRETE_IO_HANDLE tlsio_handle, const void* buffer, size_t size, ON_SEND_COMPLETE on_send_complete, void* callback_context)
 {
-    if (tlsio_handle == NULL)
+    if ((tlsio_handle == NULL) || (buffer == NULL))
         return __LINE__;
 
-    ArduinoTLS* tlsio_instance = (ArduinoTLS*)tlsio_handle;
-    return tlsio_instance->Send(buffer, size, on_send_complete, callback_context);
+	int result;
+	ArduinoTLS* tlsio_instance = (ArduinoTLS*)tlsio_handle;
+
+	if (tlsio_instance->io_state != IO_STATE_OPEN)
+	{
+		LogError("TLS is not ready to send data");
+	}
+	else
+	{
+		size_t send_result;
+		size_t send_size = size;
+		const uint8_t* runBuffer = (const uint8_t *)buffer;
+		while (send_size > 0)
+		{
+			send_result = tlsio_instance->sslClient->write(runBuffer, send_size);
+
+			if (send_result == 0) /* Didn't transmit anything! Failed. */
+			{
+				LogError("TLS failed sending data");
+				result = __LINE__;
+				if (on_send_complete != NULL)
+				{
+					on_send_complete(callback_context, IO_SEND_ERROR);
+				}
+				send_size = 0;
+			}
+			else if (send_result >= send_size) /* Transmit it all. */
+			{
+				result = 0;
+				if (on_send_complete != NULL)
+				{
+					on_send_complete(callback_context, IO_SEND_OK);
+				}
+				send_size = 0;
+			}
+			else /* Still have buffer to transmit. */
+			{
+				runBuffer += send_result;
+				send_size -= send_result;
+			}
+		}
+	}
+
+	return result;
 }
 
 void tlsio_arduino_dowork(CONCRETE_IO_HANDLE tlsio_handle)
@@ -297,8 +310,71 @@ void tlsio_arduino_dowork(CONCRETE_IO_HANDLE tlsio_handle)
     if (tlsio_handle == NULL)
         return ;
 
-    ArduinoTLS* tlsio_instance = (ArduinoTLS*)tlsio_handle;
-    tlsio_instance->Dowork();
+	int received;
+	ArduinoTLS* tlsio_instance = (ArduinoTLS*)tlsio_handle;
+	uint8_t RecvBuffer[RECEIVE_BUFFER_SIZE];
+
+	switch (tlsio_instance->io_state)
+	{
+	case IO_STATE_OPENING:
+		if (tlsio_instance->sslClient->connected())
+		{
+			tlsio_instance->io_state = IO_STATE_OPEN;
+			if (tlsio_instance->on_io_open_complete != NULL)
+			{
+				(void)tlsio_instance->on_io_open_complete(tlsio_instance->on_io_open_complete_context, IO_OPEN_OK);
+			}
+		}
+		else if ((tlsio_instance->countTry--) <= 0)
+		{
+			tlsio_instance->io_state = IO_STATE_ERROR;
+			LogError("Timeout for TLS connect");
+			if (tlsio_instance->on_io_open_complete != NULL)
+			{
+				(void)tlsio_instance->on_io_open_complete(tlsio_instance->on_io_open_complete_context, IO_OPEN_CANCELLED);
+			}
+			if (tlsio_instance->on_io_error != NULL)
+			{
+				(void)tlsio_instance->on_io_error(tlsio_instance->on_io_error_context);
+			}
+		}
+		break;
+	case IO_STATE_OPEN:
+		received = tlsio_instance->sslClient->read((uint8_t*)RecvBuffer, RECEIVE_BUFFER_SIZE);
+		if (received > 0)
+		{
+			if (tlsio_instance->on_bytes_received != NULL)
+			{
+				// explictly ignoring here the result of the callback
+				(void)tlsio_instance->on_bytes_received(tlsio_instance->on_bytes_received_context, RecvBuffer, received);
+			}
+		}
+		break;
+	case IO_STATE_CLOSING:
+		if (!tlsio_instance->sslClient->connected())
+		{
+			tlsio_instance->io_state = IO_STATE_CLOSED;
+			if (tlsio_instance->on_io_close_complete != NULL)
+			{
+				(void)tlsio_instance->on_io_close_complete(tlsio_instance->on_io_close_complete_context);
+			}
+		}
+		else if ((tlsio_instance->countTry--) <= 0)
+		{
+			tlsio_instance->io_state = IO_STATE_ERROR;
+			LogError("Timeout for close TLS");
+			if (tlsio_instance->on_io_error != NULL)
+			{
+				(void)tlsio_instance->on_io_error(tlsio_instance->on_io_error_context);
+			}
+
+		}
+		break;
+	case IO_STATE_CLOSED:
+	case IO_STATE_ERROR:
+	default:
+		break;
+	}
 }
 
 /*this function will clone an option given by name and value*/
@@ -317,7 +393,7 @@ static void tlsio_arduino_DestroyOption(const char* name, const void* value)
 int tlsio_arduino_setoption(CONCRETE_IO_HANDLE tlsio_handle, const char* optionName, const void* value)
 {
     /* Not implementing any options */
-    return __LINE__;
+    return 0;
 }
 
 OPTIONHANDLER_HANDLE tlsio_arduino_retrieveoptions(CONCRETE_IO_HANDLE tlsio_handle)
@@ -331,7 +407,7 @@ OPTIONHANDLER_HANDLE tlsio_arduino_retrieveoptions(CONCRETE_IO_HANDLE tlsio_hand
     result = OptionHandler_Create(tlsio_arduino_CloneOption, tlsio_arduino_DestroyOption, tlsio_arduino_setoption);
     if (result == NULL)
     {
-        LogError("unable to OptionHandler_Create");
+        LogError("unable to create OptionHandler");
         /*return as is*/
     }
     else
@@ -341,11 +417,12 @@ OPTIONHANDLER_HANDLE tlsio_arduino_retrieveoptions(CONCRETE_IO_HANDLE tlsio_hand
     return result;
 }
 
+
+extern "C" {
+
 const IO_INTERFACE_DESCRIPTION* tlsio_arduino_get_interface_description(void)
 {
     return &tlsio_handle_interface_description;
 }
 
-#ifdef __cplusplus
 }
-#endif /* __cplusplus */

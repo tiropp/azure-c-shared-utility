@@ -115,7 +115,8 @@ static HTTP_HEADERS_RESULT headers_ReplaceHeaderNameValuePair(HTTP_HEADERS_HANDL
             if (!replace && (existingValue != NULL))
             {
                 size_t existingValueLen = strlen(existingValue);
-                char* newValue = (char*)malloc(sizeof(char) * (existingValueLen + /*COMMA_AND_SPACE_LENGTH*/ 2 + strlen(value) + /*EOL*/ 1));
+				size_t valueLen = strlen(value);
+                char* newValue = (char*)realloc((void*)existingValue, sizeof(char) * (existingValueLen + /*COMMA_AND_SPACE_LENGTH*/ 2 + valueLen + /*EOL*/ 1));
                 if (newValue == NULL)
                 {
                     /*Codes_SRS_HTTP_HEADERS_99_015:[ The function shall return HTTP_HEADERS_ALLOC_FAILED when an internal request to allocate memory fails.]*/
@@ -126,13 +127,12 @@ static HTTP_HEADERS_RESULT headers_ReplaceHeaderNameValuePair(HTTP_HEADERS_HANDL
                 {
                     /*Codes_SRS_HTTP_HEADERS_99_017:[ If the name already exists in the collection of headers, the function shall concatenate the new value after the existing value, separated by a comma and a space as in: old-value+", "+new-value.]*/
                     char* runNewValue = newValue;
-                    (void)strcpy(runNewValue, existingValue);
                     runNewValue += existingValueLen;
                     (*runNewValue) = ',';
                     runNewValue++;
                     (*runNewValue) = ' ';
                     runNewValue++;
-                    (void)strcpy(runNewValue, value);
+                    (void)memcpy(runNewValue, value, valueLen + /*EOL*/ 1);
 
                     /*Codes_SRS_HTTP_HEADERS_99_016:[ The function shall store the name:value pair in such a way that when later retrieved by a call to GetHeader it will return a string that shall strcmp equal to the name+": "+value.]*/
                     if (Map_AddOrUpdate(handleData->headers, name, newValue) != MAP_OK)
@@ -276,7 +276,8 @@ HTTP_HEADERS_RESULT HTTPHeaders_GetHeader(HTTP_HEADERS_HANDLE handle, size_t ind
             else
             {
                 size_t keyLen = strlen(keys[index]);
-                *destination = (char*)malloc(sizeof(char) * (keyLen + /*COLON_AND_SPACE_LENGTH*/ 2 + strlen(values[index]) + /*EOL*/1));
+				size_t valueLen = strlen(values[index]);
+                *destination = (char*)malloc(sizeof(char) * (keyLen + /*COLON_AND_SPACE_LENGTH*/ 2 + valueLen + /*EOL*/ 1));
                 if (*destination == NULL)
                 {
                     /*Codes_SRS_HTTP_HEADERS_99_034:[ The function shall return HTTP_HEADERS_ERROR when an internal error occurs]*/
@@ -288,13 +289,13 @@ HTTP_HEADERS_RESULT HTTPHeaders_GetHeader(HTTP_HEADERS_HANDLE handle, size_t ind
                     /*Codes_SRS_HTTP_HEADERS_99_016:[ The function shall store the name:value pair in such a way that when later retrieved by a call to GetHeader it will return a string that shall strcmp equal to the name+": "+value.]*/
                     /*Codes_SRS_HTTP_HEADERS_99_027:[ Calling this API shall produce the string value+": "+pair) for the index header in the *destination parameter.]*/
                     char* runDestination = (*destination);
-                    strcpy(runDestination, keys[index]);
+					(void)memcpy(runDestination, keys[index], keyLen);
                     runDestination += keyLen;
                     (*runDestination) = ':';
                     runDestination++;
                     (*runDestination) = ' ';
                     runDestination++;
-                    strcpy(runDestination, values[index]);
+					(void)memcpy(runDestination, values[index], valueLen + /*EOL*/ 1);
                     /*Codes_SRS_HTTP_HEADERS_99_035:[ The function shall return HTTP_HEADERS_OK when the function executed without error.]*/
                     result = HTTP_HEADERS_OK;
                 }

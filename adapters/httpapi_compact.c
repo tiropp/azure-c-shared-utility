@@ -176,6 +176,9 @@ void HTTPAPI_CloseConnection(HTTP_HANDLE handle)
 
 static void on_io_open_complete(void* context, IO_OPEN_RESULT open_result)
 {
+	if (context == NULL)
+		return;
+
     HTTP_HANDLE_DATA* h = (HTTP_HANDLE_DATA*)context;
     if (open_result == IO_OPEN_OK)
     {
@@ -221,6 +224,9 @@ static int my_stricmp(const char* s1, const char* s2)
 
 static void on_bytes_received(void* context, const unsigned char* buffer, size_t size)
 {
+	if (context == NULL)
+		return;
+
     HTTP_HANDLE_DATA* h = (HTTP_HANDLE_DATA*)context;
 
     /* Here we got some bytes so we'll buffer them so the receive functions can consumer it */
@@ -240,6 +246,9 @@ static void on_bytes_received(void* context, const unsigned char* buffer, size_t
 
 static void on_io_error(void* context)
 {
+	if (context == NULL)
+		return;
+
     HTTP_HANDLE_DATA* h = (HTTP_HANDLE_DATA*)context;
     h->is_io_error = 1;
     LogError("on_io_error: Error signalled by underlying IO");
@@ -293,6 +302,9 @@ static int conn_receive(HTTP_HANDLE_DATA* http_instance, char* buffer, int count
 
 static void on_send_complete(void* context, IO_SEND_RESULT send_result)
 {
+	if (context == NULL)
+		return;
+
     /* If a send is complete we'll simply signal this by changing the send all state */
     HTTP_HANDLE_DATA* http_instance = (HTTP_HANDLE_DATA*)context;
     if (send_result == IO_SEND_OK)
@@ -480,18 +492,16 @@ HTTPAPI_RESULT HTTPAPI_ExecuteRequest(HTTP_HANDLE handle, HTTPAPI_REQUEST_TYPE r
             goto exit;
         }
 
-        while (1)
+        while ((httpHandle->is_connected == 0) &&
+			(httpHandle->is_io_error == 0))
         {
             xio_dowork(httpHandle->xio_handle);
-            if ((httpHandle->is_connected == 1) ||
-                (httpHandle->is_io_error == 1))
-            {
-                break;
-            }
+
+			LogInfo("Waiting for TLS connection");
 
             ThreadAPI_Sleep(1);
         }
-    }
+	}
 
     //Send request
     if ((ret = snprintf(buf, sizeof(buf), "%s %s HTTP/1.1\r\n", httpapiRequestString[requestType], relativePath)) < 0
@@ -501,7 +511,6 @@ HTTPAPI_RESULT HTTPAPI_ExecuteRequest(HTTP_HANDLE handle, HTTPAPI_REQUEST_TYPE r
         LogError("(result = %s)", ENUM_TO_STRING(HTTPAPI_RESULT, result));
         goto exit;
     }
-
     if (conn_send_all(httpHandle, buf, strlen(buf)) < 0)
     {
         result = HTTPAPI_SEND_REQUEST_FAILED;

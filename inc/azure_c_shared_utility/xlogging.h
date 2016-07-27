@@ -22,15 +22,11 @@ typedef enum LOG_CATEGORY_TAG
 
 typedef void(*LOGGER_LOG)(LOG_CATEGORY log_category, unsigned int options, const char* format, ...);
 
-#if (LOG_LEVEL_FUNC_NAME == true)
 #if defined _MSC_VER
 #define FUNC_NAME __FUNCDNAME__
 #else
 #define FUNC_NAME __func__
 #endif
-#else   // (LOG_LEVEL_FUNC_NAME == false)
-#define FUNC_NAME "-"
-#endif  // (LOG_LEVEL_FUNC_NAME)
 
 #define LOG_NONE 0x00
 #define LOG_LINE 0x01
