@@ -48,13 +48,18 @@ typedef struct HTTP_HANDLE_DATA_TAG
 /*this function only exists because some of platforms do not have sscanf. */
 static int ParseStringToDecimal(const char *src, int* dst)
 {
+	int result;
     char* next;
     (*dst) = strtol(src, &next, 0);
     if ((src == next) || ((((*dst) == LONG_MAX) || ((*dst) == LONG_MIN)) && (errno != 0)))
     {
-        return EOF;
+		result = EOF;
     }
-    return 1;
+	else
+	{
+		result = 1;
+	}
+    return result;
 }
 
 /*the following function does the same as sscanf(pos2, "%x", &sec)*/
@@ -62,110 +67,194 @@ static int ParseStringToDecimal(const char *src, int* dst)
 #define HEXA_DIGIT_VAL(c)         (((c>='0') && (c<='9')) ? (c-'0') : ((c>='a') && (c<='f')) ? (c-'a'+10) : ((c>='A') && (c<='F')) ? (c-'A'+10) : -1)
 static int ParseStringToHexadecimal(const char *src, int* dst)
 {
-    if (src == NULL)
-        return EOF;
-    if (HEXA_DIGIT_VAL(*src) == -1)
-        return EOF;
-
-    int digitVal;
-    (*dst) = 0;
-    while ((digitVal = HEXA_DIGIT_VAL(*src)) != -1)
-    {
-        (*dst) *= 0x10;
-        (*dst) += digitVal;
-        src++;
-    }
-    return 1;
+	int result;
+	if (src == NULL)
+	{
+		result = EOF;
+	}
+	else if (HEXA_DIGIT_VAL(*src) == -1)
+	{
+		result = EOF;
+	}
+	else
+	{
+		int digitVal;
+		(*dst) = 0;
+		while ((digitVal = HEXA_DIGIT_VAL(*src)) != -1)
+		{
+			(*dst) *= 0x10;
+			(*dst) += digitVal;
+			src++;
+		}
+		result = 1;
+	}
+    return result;
 }
 
 /*the following function does the same as sscanf(buf, "HTTP/%*d.%*d %d %*[^\r\n]", &ret) */
 /*this function only exists because some of platforms do not have sscanf. This is not a full implementation; it only works with well-defined HTTP response. */
-static const char HTTPprefix[5] = { 'H', 'T', 'T', 'P', '/' };
 static int  ParseHttpResponse(const char* src, int* dst)
 {
-    for (int i = 0; i < 5; i++)
-    {
-        if ((char)HTTPprefix[i] != (*src))
-            return EOF;
-        src++;
-    }
+	int result;
+	static const char HTTPPrefix[] = "HTTP/";
+	if ((src == NULL) || (dst == NULL))
+	{
+		result = EOF;
+	}
+	else
+	{
+		bool fail = false;
+		const char* runPrefix = HTTPPrefix;
 
-    while ((*src) != '.')
-    {
-        if ((*src) == '\0')
-            return EOF;
-        src++;
-    }
+		while((*runPrefix) != '\0')
+		{
+			if ((*runPrefix) != (*src))
+			{
+				fail = true;
+				break;
+			}
+			src++;
+			runPrefix++;
+		}
 
-    while ((*src) != ' ')
-    {
-        if ((*src) == '\0')
-            return EOF;
-        src++;
-    }
+		if (!fail)
+		{
+			while ((*src) != '.')
+			{
+				if ((*src) == '\0')
+				{
+					fail = true;
+				}
+				src++;
+			}
+		}
 
-    return ParseStringToDecimal(src, dst);
+		if (!fail)
+		{
+			while ((*src) != ' ')
+			{
+				if ((*src) == '\0')
+				{
+					fail = true;
+				}
+				src++;
+			}
+		}
+
+		if (fail)
+		{
+			result = EOF;
+		}
+		else
+		{
+			result = ParseStringToDecimal(src, dst);
+		}
+	}
+
+    return result;
 }
-
 
 HTTPAPI_RESULT HTTPAPI_Init(void)
 {
+	/*Codes_SRS_httpapi_compact_21_005: [ The HTTPAPI_Init must allocate all memory to control the http protocol. ]*/
+	/*Codes_SRS_httpapi_compact_21_008: [ If there is not enough memory to control the http protocol, the HTTPAPI_Init must return HTTPAPI_ALLOC_FAILED. ]*/
+	/**
+	 * No memory is necessary. 
+	 */
+
+	/*Codes_SRS_httpapi_compact_21_006: [ The HTTPAPI_Init must initialize all artifact to control the http protocol. ]*/
+	/*Codes_SRS_httpapi_compact_21_009: [ If there is a problem initializing any artifact, the HTTPAPI_Init must return HTTPAPI_INIT_FAILED. ]*/
+	/**
+	* No artifact is necessary.
+	*/
+
+	/*Codes_SRS_httpapi_compact_21_007: [ If HTTPAPI_Init get success allocating all the needed memory, it must return HTTPAPI_OK. ]*/
     return HTTPAPI_OK;
 }
 
 void HTTPAPI_Deinit(void)
 {
+	/*Codes_SRS_httpapi_compact_21_010: [ The HTTPAPI_Init must release all memory allocated by the httpapi_compact. ]*/
+	/**
+	* No memory was necessary.
+	*/
+
+	/*Codes_SRS_httpapi_compact_21_011: [ The HTTPAPI_Init must release all artifact to control the http protocol. ]*/
+	/**
+	* No artifact was necessary.
+	*/
 }
 
+/*Codes_SRS_httpapi_compact_21_012: [ The HTTPAPI_CreateConnection must create an http connection to the host specified by the hostName parameter. ]*/
 HTTP_HANDLE HTTPAPI_CreateConnection(const char* hostName)
 {
-    HTTP_HANDLE_DATA* handle = NULL;
+    HTTP_HANDLE_DATA* handle;
 
-    if (hostName)
-    {
-        handle = (HTTP_HANDLE_DATA*)malloc(sizeof(HTTP_HANDLE_DATA));
-        if (handle != NULL)
-        {
-            TLSIO_CONFIG tlsio_config = { hostName, 443 };
-            handle->xio_handle = xio_create(platform_get_default_tlsio(), (void*)&tlsio_config);
-            if (handle->xio_handle == NULL)
-            {
-                LogError("HTTPAPI_CreateConnection::xio_create failed");
-                free(handle);
-                handle = NULL;
-            }
-            else
-            {
-                handle->is_connected = 0;
-                handle->is_io_error = 0;
-                handle->received_bytes_count = 0;
-                handle->received_bytes = NULL;
-                handle->send_all_result = SEND_ALL_RESULT_NOT_STARTED;
-                handle->certificate = NULL;
-            }
-        }
-    }
-    else
-    {
-        LogInfo("HTTPAPI_CreateConnection:: null hostName parameter");
-    }
+	if (hostName == NULL)
+	{
+		/*Codes_SRS_httpapi_compact_21_015: [ If the hostName is NULL, the HTTPAPI_CreateConnection must return NULL as the handle. ]*/
+		LogError("Invalid host name. Null hostName parameter.");
+		handle = NULL;
+	}
+	else if (*hostName == '\0')
+	{
+		/*Codes_SRS_httpapi_compact_21_016: [ If the hostName is empty, the HTTPAPI_CreateConnection must return NULL as the handle. ]*/
+		LogError("Invalid host name. Empty string.");
+		handle = NULL;
+	}
+	else
+	{
+		handle = (HTTP_HANDLE_DATA*)malloc(sizeof(HTTP_HANDLE_DATA));
+		/*Codes_SRS_httpapi_compact_21_014: [ If there is not enough memory to control the http connection, the HTTPAPI_CreateConnection must return NULL as the handle. ]*/
+		if (handle == NULL)
+		{
+			LogError("There is no memory to control the http connection");
+		}
+		else
+		{
+			TLSIO_CONFIG tlsio_config = { hostName, 443 };
+			handle->xio_handle = xio_create(platform_get_default_tlsio(), (void*)&tlsio_config);
 
-    return (HTTP_HANDLE)handle;
+			/*Codes_SRS_httpapi_compact_21_017: [ If the HTTPAPI_CreateConnection failed to create the connection, it must return NULL as the handle. ]*/
+			if (handle->xio_handle == NULL)
+			{
+				LogError("Create connection failed");
+				free(handle);
+				handle = NULL;
+			}
+			else
+			{
+				handle->is_connected = 0;
+				handle->is_io_error = 0;
+				handle->received_bytes_count = 0;
+				handle->received_bytes = NULL;
+				handle->send_all_result = SEND_ALL_RESULT_NOT_STARTED;
+				handle->certificate = NULL;
+			}
+		}
+	}
+
+	/*Codes_SRS_httpapi_compact_21_013: [ The HTTPAPI_CreateConnection must return the connection handle(HTTP_HANDLE). ]*/
+	return (HTTP_HANDLE)handle;
 }
 
 void HTTPAPI_CloseConnection(HTTP_HANDLE handle)
 {
     HTTP_HANDLE_DATA* h = (HTTP_HANDLE_DATA*)handle;
 
-    if (h)
+	/*Codes_SRS_httpapi_compact_21_021: [ If the connection handle is NULL, the HTTPAPI_CloseConnection must not do anything. ]*/
+	if (h != NULL)
     {
-        if (h->xio_handle != NULL)
+		/*Codes_SRS_httpapi_compact_21_020: [ If there is no previous connection, the HTTPAPI_CloseConnection must not do anything. ]*/
+		if (h->xio_handle != NULL)
         {
-            LogInfo("HTTPAPI_CloseConnection xio_destroy()");
+			/*Codes_SRS_httpapi_compact_21_018: [ The HTTPAPI_CloseConnection must close the connection previously created in HTTPAPI_CreateConnection. ]*/
+			LogInfo("Close http connection.");
             xio_destroy(h->xio_handle);
         }
 
-        if (h->certificate)
+		/*Codes_SRS_httpapi_compact_21_019: [ If there is a certificate associated to this connection, the HTTPAPI_CloseConnection must free all allocated memory for the certificate. ]*/
+		if (h->certificate)
         {
             free(h->certificate);
         }
@@ -176,153 +265,170 @@ void HTTPAPI_CloseConnection(HTTP_HANDLE handle)
 
 static void on_io_open_complete(void* context, IO_OPEN_RESULT open_result)
 {
-	if (context == NULL)
-		return;
-
-    HTTP_HANDLE_DATA* h = (HTTP_HANDLE_DATA*)context;
-    if (open_result == IO_OPEN_OK)
-    {
-        h->is_connected = 1;
-        h->is_io_error = 0;
-    }
-    else
-    {
-        h->is_io_error = 1;
-    }
+	if (context != NULL)
+	{
+		HTTP_HANDLE_DATA* h = (HTTP_HANDLE_DATA*)context;
+		if (open_result == IO_OPEN_OK)
+		{
+			h->is_connected = 1;
+			h->is_io_error = 0;
+		}
+		else
+		{
+			h->is_io_error = 1;
+		}
+	}
 }
 
 #define TOLOWER(c) (((c>='A') && (c<='Z'))?c-'A'+'a':c)
 static int my_strnicmp(const char* s1, const char* s2, size_t n)
 {
-    int result = 0;
+    int result;
 
-    while(((n--)>=0) && ((*s1) != '\0') && ((*s2) != '\0') && (result == 0))
-    {
-        /* compute the difference between the chars */
-        result = TOLOWER(*s1) - TOLOWER(*s2);
-        s1++;
-        s2++;
-    }
+	if ((s1 == NULL) || (s2 == NULL))
+	{
+		result = -1;
+	}
+	else
+	{
+		result = 0;
+		while (((n--) >= 0) && ((*s1) != '\0') && ((*s2) != '\0') && (result == 0))
+		{
+			/* compute the difference between the chars */
+			result = TOLOWER(*s1) - TOLOWER(*s2);
+			s1++;
+			s2++;
+		}
+	}
 
     return result;
 }
 
 static int my_stricmp(const char* s1, const char* s2)
 {
-    int result = 0;
+	int result;
 
-    while (((*s1) != '\0') && ((*s2) != '\0') && (result == 0))
-    {
-        /* compute the difference between the chars */
-        result = TOLOWER(*s1) - TOLOWER(*s2);
-        s1++;
-        s2++;
-    }
+	if ((s1 == NULL) || (s2 == NULL))
+	{
+		result = -1;
+	}
+	else
+	{
+		result = 0;
+
+		while (((*s1) != '\0') && ((*s2) != '\0') && (result == 0))
+		{
+			/* compute the difference between the chars */
+			result = TOLOWER(*s1) - TOLOWER(*s2);
+			s1++;
+			s2++;
+		}
+	}
 
     return result;
 }
 
 static void on_bytes_received(void* context, const unsigned char* buffer, size_t size)
 {
-	if (context == NULL)
-		return;
+	if (context != NULL)
+	{
+		HTTP_HANDLE_DATA* h = (HTTP_HANDLE_DATA*)context;
 
-    HTTP_HANDLE_DATA* h = (HTTP_HANDLE_DATA*)context;
-
-    /* Here we got some bytes so we'll buffer them so the receive functions can consumer it */
-    unsigned char* new_received_bytes = (unsigned char*)realloc(h->received_bytes, h->received_bytes_count + size);
-    if (new_received_bytes == NULL)
-    {
-        h->is_io_error = 1;
-        LogError("on_bytes_received: Error allocating memory for received data");
-    }
-    else
-    {
-        h->received_bytes = new_received_bytes;
-        (void)memcpy(h->received_bytes + h->received_bytes_count, buffer, size);
-        h->received_bytes_count += size;
-    }
+		/* Here we got some bytes so we'll buffer them so the receive functions can consumer it */
+		unsigned char* new_received_bytes = (unsigned char*)realloc(h->received_bytes, h->received_bytes_count + size);
+		if (new_received_bytes == NULL)
+		{
+			h->is_io_error = 1;
+			LogError("on_bytes_received: Error allocating memory for received data");
+		}
+		else
+		{
+			h->received_bytes = new_received_bytes;
+			(void)memcpy(h->received_bytes + h->received_bytes_count, buffer, size);
+			h->received_bytes_count += size;
+		}
+	}
 }
 
 static void on_io_error(void* context)
 {
-	if (context == NULL)
-		return;
-
-    HTTP_HANDLE_DATA* h = (HTTP_HANDLE_DATA*)context;
-    h->is_io_error = 1;
-    LogError("on_io_error: Error signalled by underlying IO");
+	if (context != NULL)
+	{
+		HTTP_HANDLE_DATA* h = (HTTP_HANDLE_DATA*)context;
+		h->is_io_error = 1;
+		LogError("on_io_error: Error signalled by underlying IO");
+	}
 }
 
 static int conn_receive(HTTP_HANDLE_DATA* http_instance, char* buffer, int count)
 {
-    int result = 0;
+    int result;
 
-    if (count < 0)
-    {
-        result = -1;
-    }
-    else
-    {
-        while (result < count)
-        {
-            xio_dowork(http_instance->xio_handle);
+	if ((http_instance == NULL) || (buffer == NULL) || (count < 0))
+	{
+		result = -1;
+	}
+	else
+	{
+		while (result < count)
+		{
+			xio_dowork(http_instance->xio_handle);
 
-            /* if any error was detected while receiving then simply break and report it */
-            if (http_instance->is_io_error != 0)
-            {
-                result = -1;
-                break;
-            }
+			/* if any error was detected while receiving then simply break and report it */
+			if (http_instance->is_io_error != 0)
+			{
+				result = -1;
+				break;
+			}
 
-            if (http_instance->received_bytes_count >= (size_t)count)
-            {
-                /* Consuming bytes from the receive buffer */
-                (void)memcpy(buffer, http_instance->received_bytes, count);
-                (void)memmove(http_instance->received_bytes, http_instance->received_bytes + count, http_instance->received_bytes_count - count);
-                http_instance->received_bytes_count -= count;
+			if (http_instance->received_bytes_count >= (size_t)count)
+			{
+				/* Consuming bytes from the receive buffer */
+				(void)memcpy(buffer, http_instance->received_bytes, count);
+				(void)memmove(http_instance->received_bytes, http_instance->received_bytes + count, http_instance->received_bytes_count - count);
+				http_instance->received_bytes_count -= count;
 
-                /* we're not reallocating at each consumption so that we don't trash due to byte by byte consumption */
-                if (http_instance->received_bytes_count == 0)
-                {
-                    free(http_instance->received_bytes);
-                    http_instance->received_bytes = NULL;
-                }
+				/* we're not reallocating at each consumption so that we don't trash due to byte by byte consumption */
+				if (http_instance->received_bytes_count == 0)
+				{
+					free(http_instance->received_bytes);
+					http_instance->received_bytes = NULL;
+				}
 
-                result = count;
-                break;
-            }
+				result = count;
+				break;
+			}
 
-            ThreadAPI_Sleep(1);
-        }
-    }
+			ThreadAPI_Sleep(1);
+		}
+	}
 
     return result;
 }
 
 static void on_send_complete(void* context, IO_SEND_RESULT send_result)
 {
-	if (context == NULL)
-		return;
-
-    /* If a send is complete we'll simply signal this by changing the send all state */
-    HTTP_HANDLE_DATA* http_instance = (HTTP_HANDLE_DATA*)context;
-    if (send_result == IO_SEND_OK)
-    {
-        http_instance->send_all_result = SEND_ALL_RESULT_OK;
-    }
-    else
-    {
-        http_instance->send_all_result = SEND_ALL_RESULT_ERROR;
-    }
+	if (context != NULL)
+	{
+		/* If a send is complete we'll simply signal this by changing the send all state */
+		HTTP_HANDLE_DATA* http_instance = (HTTP_HANDLE_DATA*)context;
+		if (send_result == IO_SEND_OK)
+		{
+			http_instance->send_all_result = SEND_ALL_RESULT_OK;
+		}
+		else
+		{
+			http_instance->send_all_result = SEND_ALL_RESULT_ERROR;
+		}
+	}
 }
 
-static int conn_send_all(HTTP_HANDLE_DATA* http_instance, char* buffer, int count)
+static int conn_send_all(HTTP_HANDLE_DATA* http_instance, const char* buffer, int count)
 {
     int result;
 
-    if (count < 0)
-    {
+	if ((http_instance == NULL) || (buffer == 0) || (count < 0))
+	{
         result = -1;
     }
     else
@@ -384,21 +490,46 @@ static int conn_send_all(HTTP_HANDLE_DATA* http_instance, char* buffer, int coun
 static int readLine(HTTP_HANDLE_DATA* http_instance, char* buf, const size_t size)
 {
     // reads until \r\n is encountered. writes in buf all the characters
+	int result;
     char* p = buf;
     char  c;
-    if (conn_receive(http_instance, &c, 1) < 0)
-        return -1;
-    while (c != '\r') {
-        if ((p - buf + 1) >= (int)size)
-            return -1;
-        *p++ = c;
-        if (conn_receive(http_instance, &c, 1) < 0)
-            return -1;
-    }
-    *p = 0;
-    if (conn_receive(http_instance, &c, 1) < 0 || c != '\n') // skip \n
-        return -1;
-    return p - buf;
+
+	if (conn_receive(http_instance, &c, 1) < 0)
+	{
+		result = -1;
+	}
+	else
+	{
+		result = 0;
+		while (c != '\r') 
+		{
+			if ((p - buf + 1) >= (int)size)
+			{
+				result = -1;
+				break;
+			}
+			
+			*p++ = c;
+			if (conn_receive(http_instance, &c, 1) < 0)
+			{
+				result = -1;
+				break;
+			}
+		}
+
+		if (result != -1)
+		{
+			*p = 0;
+			if (conn_receive(http_instance, &c, 1) < 0 || c != '\n') // skip \n
+			{
+				result = -1;
+			}
+		}
+
+		result = p - buf;
+	}
+
+	return result;
 }
 
 static int readChunk(HTTP_HANDLE_DATA* http_instance, char* buf, size_t size)
@@ -414,8 +545,10 @@ static int readChunk(HTTP_HANDLE_DATA* http_instance, char* buf, size_t size)
         cur = conn_receive(http_instance, buf + offset, size);
 
         // end of stream reached
-        if (cur == 0)
-            return offset;
+		if (cur == 0)
+		{
+			break;
+		}
 
         // read cur bytes (might be less than requested)
         size -= cur;
@@ -432,18 +565,58 @@ static int skipN(HTTP_HANDLE_DATA* http_instance, size_t n, char* buf, size_t si
     // returns -1 in case of error.
     while (n > size)
     {
-        if (readChunk(http_instance, (char*)buf, size) < 0)
-            return -1;
+		if (readChunk(http_instance, (char*)buf, size) < 0)
+		{
+			org = -1;
+			break;
+		}
 
         n -= size;
     }
 
-    if (readChunk(http_instance, (char*)buf, n) < 0)
-        return -1;
+	if (org >= 0)
+	{
+		if (readChunk(http_instance, (char*)buf, n) < 0)
+		{
+			org = -1;
+		}
+	}
 
     return org;
 }
 
+/*Codes_SRS_httpapi_compact_21_022: [ The HTTPAPI_ExecuteRequest must execute the http communtication with the provided host, sending a request and reciving the response. ]*/
+/*Codes_SRS_httpapi_compact_21_023: [ If a Certificate was provided, the HTTPAPI_ExecuteRequest must set this option on the transport layer. ]*/
+/*Codes_SRS_httpapi_compact_21_024: [ If the transport failed setting the Certificate, the HTTPAPI_ExecuteRequest must not send any request and return HTTPAPI_SET_OPTION_FAILED. ]*/
+/*Codes_SRS_httpapi_compact_21_025: [ The HTTPAPI_ExecuteRequest must open the transport connection with the host to send the request. ]*/
+/*Codes_SRS_httpapi_compact_21_026: [ If the open process failed, the HTTPAPI_ExecuteRequest must not send any request and return HTTPAPI_OPEN_REQUEST_FAILED. ]*/
+/*Codes_SRS_httpapi_compact_21_027: [ If the open process succeed, the HTTPAPI_ExecuteRequest must send the request message to the host. ]*/
+/*Codes_SRS_httpapi_compact_21_028: [ If the HTTPAPI_ExecuteRequest cannot create a buffer to send the request, it must not send any request and return HTTPAPI_STRING_PROCESSING_ERROR. ]*/
+/*Codes_SRS_httpapi_compact_21_029: [ If the HTTPAPI_ExecuteRequest cannot send the request header, it must return HTTPAPI_HTTP_HEADERS_FAILED. ]*/
+/*Codes_SRS_httpapi_compact_21_030: [ If the HTTPAPI_ExecuteRequest cannot send the buffer with the request, it must return HTTPAPI_SEND_REQUEST_FAILED. ]*/
+/*Codes_SRS_httpapi_compact_21_031: [ At the end of the transmission, the HTTPAPI_ExecuteRequest must receive the response from the host. ]*/
+/*Codes_SRS_httpapi_compact_21_032: [ After receive the response, the HTTPAPI_ExecuteRequest must close the transport connection with the host. ]*/
+/*Codes_SRS_httpapi_compact_21_033: [ If the HTTPAPI_ExecuteRequest cannot read the message with the request result, it must return HTTPAPI_READ_DATA_FAILED. ]*/
+/*Codes_SRS_httpapi_compact_21_034: [ If the whole process succeed, the HTTPAPI_ExecuteRequest must retur HTTPAPI_OK. ]*/
+/*Codes_SRS_httpapi_compact_21_035: [ If there is no previous connection, the HTTPAPI_ExecuteRequest must return HTTPAPI_INVALID_ARG. ]*/
+/*Codes_SRS_httpapi_compact_21_036: [ The HTTPAPI_ExecuteRequest must execute resquest for types `GET`, `POST`, `PUT`, `DELETE`, `PATCH`. ]*/
+/*Codes_SRS_httpapi_compact_21_037: [ The request type must be provided in the parameter requestType. ]*/
+/*Codes_SRS_httpapi_compact_21_038: [ If the request type is unknown, the HTTPAPI_ExecuteRequest must return HTTPAPI_INVALID_ARG. ]*/
+/*Codes_SRS_httpapi_compact_21_039: [ The HTTPAPI_ExecuteRequest must execute the resquest for the path in relativePath parameter. ]*/
+/*Codes_SRS_httpapi_compact_21_040: [ If the relativePath is NULL or invalid, the HTTPAPI_ExecuteRequest must return HTTPAPI_INVALID_ARG. ]*/
+/*Codes_SRS_httpapi_compact_21_041: [ The requst must contain the http header provided in httpHeadersHandle parameter. ]*/
+/*Codes_SRS_httpapi_compact_21_042: [ If the httpHeadersHandle is NULL or invalid, the HTTPAPI_ExecuteRequest must return HTTPAPI_INVALID_ARG. ]*/
+/*Codes_SRS_httpapi_compact_21_043: [ The request can contain the a content message, provided in content parameter. ]*/
+/*Codes_SRS_httpapi_compact_21_044: [ If the content is NULL, the HTTPAPI_ExecuteRequest must send the request without content. ]*/
+/*Codes_SRS_httpapi_compact_21_045: [ If the content is not NULL, the number of bytes in the content must be provided in contentLength parameter. ]*/
+/*Codes_SRS_httpapi_compact_21_046: [ If the contentLength is lower than one, the HTTPAPI_ExecuteRequest must send the request without content. ]*/
+/*Codes_SRS_httpapi_compact_21_047: [ The HTTPAPI_ExecuteRequest must return the http status reported by the host in the received response. ]*/
+/*Codes_SRS_httpapi_compact_21_048: [ The HTTPAPI_ExecuteRequest must report the status in the statusCode parameter. ]*/
+/*Codes_SRS_httpapi_compact_21_049: [ If the statusCode is NULL, the HTTPAPI_ExecuteRequest must report not report any status. ]*/
+/*Codes_SRS_httpapi_compact_21_050: [ If responseHeadersHandle is provide, the HTTPAPI_ExecuteRequest must prepare a Response Header usign the HTTPHeaders_AddHeaderNameValuePair. ]*/
+/*Codes_SRS_httpapi_compact_21_051: [ If there is a content in the response, the HTTPAPI_ExecuteRequest must copy it in the responseContent buffer. ]*/
+/*Codes_SRS_httpapi_compact_21_052: [ If the responseContent is NULL, the HTTPAPI_ExecuteRequest must ignore any content in the response. ]*/
+/*Codes_SRS_httpapi_compact_21_053: [ If any memory allocation get fail, the HTTPAPI_ExecuteRequest must return HTTPAPI_ALLOC_FAILED. ]*/
 static const char httpapiRequestString[5][7] = { "GET", "POST", "PUT", "DELETE", "PATCH" };
 
 //Note: This function assumes that "Host:" and "Content-Length:" headers are setup
@@ -479,7 +652,7 @@ HTTPAPI_RESULT HTTPAPI_ExecuteRequest(HTTP_HANDLE handle, HTTPAPI_REQUEST_TYPE r
         if ((httpHandle->certificate != NULL) &&
 			(xio_setoption(httpHandle->xio_handle, "TrustedCerts", httpHandle->certificate) != 0))
         {
-            result = HTTPAPI_ERROR;
+            result = HTTPAPI_SET_OPTION_FAILED;
             LogError("Could not load certificate (result = %s)", ENUM_TO_STRING(HTTPAPI_RESULT, result));
             goto exit;
         }
@@ -487,7 +660,7 @@ HTTPAPI_RESULT HTTPAPI_ExecuteRequest(HTTP_HANDLE handle, HTTPAPI_REQUEST_TYPE r
         // Make the connection
         if (xio_open(httpHandle->xio_handle, on_io_open_complete, httpHandle , on_bytes_received, httpHandle, on_io_error, httpHandle) != 0)
         {
-            result = HTTPAPI_ERROR;
+            result = HTTPAPI_OPEN_REQUEST_FAILED;
             LogError("Could not connect (result = %s)", ENUM_TO_STRING(HTTPAPI_RESULT, result));
             goto exit;
         }
@@ -503,6 +676,13 @@ HTTPAPI_RESULT HTTPAPI_ExecuteRequest(HTTP_HANDLE handle, HTTPAPI_REQUEST_TYPE r
         }
 	}
 
+	if (httpHandle->is_io_error != 0)
+	{
+		result = HTTPAPI_OPEN_REQUEST_FAILED;
+		LogError("(result = %s)", ENUM_TO_STRING(HTTPAPI_RESULT, result));
+		goto exit;
+	}
+
     //Send request
     if ((ret = snprintf(buf, sizeof(buf), "%s %s HTTP/1.1\r\n", httpapiRequestString[requestType], relativePath)) < 0
         || ret >= sizeof(buf))
@@ -511,6 +691,7 @@ HTTPAPI_RESULT HTTPAPI_ExecuteRequest(HTTP_HANDLE handle, HTTPAPI_REQUEST_TYPE r
         LogError("(result = %s)", ENUM_TO_STRING(HTTPAPI_RESULT, result));
         goto exit;
     }
+
     if (conn_send_all(httpHandle, buf, strlen(buf)) < 0)
     {
         result = HTTPAPI_SEND_REQUEST_FAILED;
