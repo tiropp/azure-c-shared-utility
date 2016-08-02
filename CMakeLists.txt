@@ -33,8 +33,9 @@ if(MSVC)
   
     endif()
 elseif(LINUX)
-  set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Werror")
-  set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -Werror")
+    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Werror")
+    set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -Werror")
+    set (CMAKE_C_FLAGS "-D_POSIX_SOURCE ${CMAKE_C_FLAGS}")
 endif()
 
 
@@ -46,14 +47,14 @@ set(SHARED_UTIL_ADAPTER_FOLDER "${CMAKE_CURRENT_LIST_DIR}/adapters" CACHE INTERN
 
 include_directories(${SHARED_UTIL_INC_FOLDER})
 if (WINCE)
-include_directories(${SHARED_UTIL_INC_FOLDER}/azure_c_shared_utility/windowsce) #windowsce SDK doesn't have stdbool.h
+	include_directories(${SHARED_UTIL_INC_FOLDER}/azure_c_shared_utility/windowsce) #windowsce SDK doesn't have stdbool.h
 ENDIF()
 
 
 #the following variables are project-wide and can be used with cmake-gui
 option(skip_unittests "set skip_unittests to ON to skip unittests (default is OFF)[if possible, they are always build]" OFF)
 option(use_http "set use_http to ON if http is to be used, set to OFF to not use http" ON)
-option(use_condition "set use_condition to ON if the condition module and its adapters should be enabled" ON)
+option(use_condition "set use_condition to ON if the condition module and its adapters should be enabled" OFF)
 
 if(WIN32)
     option(use_schannel "set use_schannel to ON if schannel is to be used, set to OFF to not use schannel" ON)
@@ -235,7 +236,7 @@ function(linux_unittests_add_exe whatIsBuilding)
             elseif(PARSING_VALGRIND_SUPPRESSION_FILE)
                 set(VALGRIND_SUPPRESSIONS_FILE_EXTRA_PARAMETER "--suppressions=${f}")
             endif()
-        endif()	
+        endif() 
         
     endforeach()
     
@@ -413,7 +414,7 @@ function(c_linux_unittests_add_exe whatIsBuilding folder)
             target_link_libraries(${whatIsBuilding}_exe ${f})
                 elseif(PARSING_VALGRIND_SUPPRESSION_FILE)
                         set(VALGRIND_SUPPRESSIONS_FILE_EXTRA_PARAMETER "--suppressions=${f}")
-        endif()	
+        endif() 
         
     endforeach()
     
@@ -653,7 +654,7 @@ endif()
 if(${use_openssl})
     set(source_h_files ${source_h_files}
         ./inc/azure_c_shared_utility/tlsio_openssl.h
-	./inc/azure_c_shared_utility/x509_openssl.h
+    ./inc/azure_c_shared_utility/x509_openssl.h
     )
     if(WIN32)
         include_directories($ENV{OpenSSLDir}/include)
@@ -673,13 +674,13 @@ endif()
 IF(WIN32)
     #windows needs this define
     add_definitions(-D_CRT_SECURE_NO_WARNINGS)
-	IF(WINCE)
-	# Don't treat warning as errors for WEC 2013. WEC 2013 uses older compiler version 
-	add_definitions(/WX-)
-	ELSE()
-	# Make warning as error
+    IF(WINCE)
+    # Don't treat warning as errors for WEC 2013. WEC 2013 uses older compiler version 
+    add_definitions(/WX-)
+    ELSE()
+    # Make warning as error
     add_definitions(/WX)
-	ENDIF()
+    ENDIF()
 ELSE()
     # Make warning as error
     set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Werror")
