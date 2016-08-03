@@ -45,7 +45,7 @@ typedef enum RESPONSE_MESSAGE_STATE_TAG
     STATE_RESPONSE_HEADER,
     STATE_MESSAGE_BODY,
     STATE_MESSAGE_CHUNKED,
-    STATE_ERROR
+    STATE_ERROR,
 } RESPONSE_MESSAGE_STATE;
 
 typedef struct HTTP_RECV_DATA_TAG
@@ -106,16 +106,15 @@ static void get_log_time(char* timeResult, size_t len)
 static int process_status_line(HTTP_RECV_DATA* recv_data, size_t* position)
 {
     int result = __LINE__;
-    size_t index;
     int spaceFound = 0;
     const char* initSpace = NULL;
     char statusCode[4];
 
-    for (index = 0; index < recv_data->storedLen; index++)
+    for (size_t index = 0; index < recv_data->storedLen; index++)
     {
         if (recv_data->storedBytes[index] == ' ')
         {
-            if (spaceFound == 1)
+            if (spaceFound == 1 && initSpace != NULL)
             {
                 if (strncpy(statusCode, initSpace, 3) == NULL)
                 {
@@ -342,6 +341,7 @@ static void on_io_open_complete(void* context, IO_OPEN_RESULT open_result)
         }
         else
         {
+            http_data->is_connected = 0;
             http_data->is_io_error = 1;
         }
     }
@@ -351,36 +351,100 @@ static void on_io_open_complete(void* context, IO_OPEN_RESULT open_result)
     }
 }
 
+static int initialize_recv_message(HTTP_RECV_DATA* recv_msg)
+{
+    int result;
+    recv_msg->respHeader = HTTPHeaders_Alloc();
+    if (recv_msg->respHeader == NULL)
+    {
+        recv_msg->recvState = STATE_ERROR;
+        LogError("failure allocating HTTPHeader.");
+        result = __LINE__;
+    }
+    else
+    {
+        recv_msg->msgBody = BUFFER_new();
+        if (recv_msg->msgBody == NULL)
+        {
+            recv_msg->recvState = STATE_ERROR;
+            LogError("failure allocating BUFFER.");
+            result = __LINE__;
+        }
+        else
+        {
+            result = 0;
+        }
+    }
+    recv_msg->chunkedReply = false;
+    return result;
+}
+
+static int allocate_storage_data(HTTP_RECV_DATA* recv_msg, const unsigned char* buffer, size_t len)
+{
+    int result;
+    if (recv_msg->storedLen == 0)
+    {
+        recv_msg->storedBytes = (unsigned char*)malloc(len);
+        if (recv_msg->storedBytes == NULL)
+        {
+            LogError("Failure reallocating buffer.");
+            recv_msg->recvState = STATE_ERROR;
+            result = __LINE__;
+        }
+        else
+        {
+            memcpy(recv_msg->storedBytes, buffer, len);
+            recv_msg->storedLen = len;
+            result = 0;
+        }
+    }
+    else
+    {
+        size_t newSize = recv_msg->storedLen+len;
+        unsigned char* tmpBuff = (unsigned char*)malloc(newSize);
+        if (tmpBuff == NULL)
+        {
+            LogError("Failure reallocating buffer.");
+            recv_msg->recvState = STATE_ERROR;
+            free(recv_msg->storedBytes);
+            recv_msg->storedBytes = NULL;
+            result = __LINE__;
+        }
+        else
+        {
+            memcpy(tmpBuff, recv_msg->storedBytes, recv_msg->storedLen);
+            free(recv_msg->storedBytes);
+            recv_msg->storedBytes = tmpBuff;
+            memcpy(recv_msg->storedBytes+recv_msg->storedLen, buffer, len);
+            recv_msg->storedLen = newSize;
+            result = 0;
+        }
+    }
+    return result;
+}
+
 static void on_bytes_recv(void* context, const unsigned char* buffer, size_t len)
 {
     HTTP_HANDLE_DATA* http_data = (HTTP_HANDLE_DATA*)context;
-    size_t index = 0;
     HTTPAPI_RESULT execute_result;
 
     if (http_data != NULL && buffer != NULL && len > 0 && http_data->recvMsg.recvState != STATE_ERROR && http_data->recvMsg.fn_execute_complete != NULL)
     {
         if (http_data->recvMsg.recvState == STATE_INITIAL)
         {
-            if (http_data->recvMsg.respHeader == NULL)
+            if (http_data->recvMsg.respHeader == NULL && http_data->recvMsg.msgBody == NULL)
             {
-                http_data->recvMsg.respHeader = HTTPHeaders_Alloc();
-                if (http_data->recvMsg.respHeader == NULL)
+                if (http_data->logTrace)
                 {
-                    http_data->recvMsg.recvState = STATE_ERROR;
-                    LogError("failure allocating HTTPHeader.");
+                    char timeResult[TIME_MAX_BUFFER];
+                    get_log_time(timeResult, TIME_MAX_BUFFER);
+                    LOG(LOG_TRACE, 0, "<- %s\r\n", timeResult);
                 }
-            }
-            if (http_data->recvMsg.recvState = http_data->recvMsg.msgBody == NULL)
-            {
-                http_data->recvMsg.msgBody = BUFFER_new();
-            }
-            http_data->recvMsg.chunkedReply = false;
 
-            if (http_data->logTrace)
-            {
-                char timeResult[TIME_MAX_BUFFER];
-                get_log_time(timeResult, TIME_MAX_BUFFER);
-                LOG(LOG_TRACE, 0, "<- %s\r\n", timeResult);
+                if (initialize_recv_message(&http_data->recvMsg) != 0)
+                {
+
+                }
             }
         }
 
@@ -393,37 +457,15 @@ static void on_bytes_recv(void* context, const unsigned char* buffer, size_t len
             }
         }
 
-        if (http_data->recvMsg.storedLen == 0)
+        if (allocate_storage_data(&http_data->recvMsg, buffer, len) != 0)
         {
-            http_data->recvMsg.storedBytes = (unsigned char*)malloc(len);
-            memcpy(http_data->recvMsg.storedBytes, buffer, len);
-            http_data->recvMsg.storedLen = len;
-        }
-        else
-        {
-            size_t newSize = http_data->recvMsg.storedLen+len;
-            unsigned char* tmpBuff = (unsigned char*)malloc(newSize);
-            if (tmpBuff == NULL)
-            {
-                LogError("Failure reallocating buffer.");
-                http_data->recvMsg.recvState = STATE_ERROR;
-                free(http_data->recvMsg.storedBytes);
-                http_data->recvMsg.storedBytes = NULL;
-                execute_result = HTTPAPI_ALLOC_FAILED;
-            }
-            else
-            {
-                memcpy(tmpBuff, http_data->recvMsg.storedBytes, http_data->recvMsg.storedLen);
-                free(http_data->recvMsg.storedBytes);
-                http_data->recvMsg.storedBytes = tmpBuff;
-                memcpy(http_data->recvMsg.storedBytes+http_data->recvMsg.storedLen, buffer, len);
-                http_data->recvMsg.storedLen = newSize;
-            }
+            execute_result = HTTPAPI_INIT_FAILED;
+            http_data->recvMsg.recvState = STATE_ERROR;
         }
 
         if (http_data->recvMsg.recvState == STATE_INITIAL)
         {
-            index = 0;
+            size_t index = 0;
             int lineComplete = process_status_line(&http_data->recvMsg, &index);
             if (lineComplete == 0 && http_data->recvMsg.statusCode > 0)
             {
@@ -441,7 +483,7 @@ static void on_bytes_recv(void* context, const unsigned char* buffer, size_t len
         if (http_data->recvMsg.recvState == STATE_STATUS_LINE)
         {
             // Gather the Header
-            index = 0;
+            size_t index = 0;
             int headerComplete = process_header_line(&http_data->recvMsg, &index);
             if (headerComplete == 0)
             {
@@ -469,10 +511,19 @@ static void on_bytes_recv(void* context, const unsigned char* buffer, size_t len
                 // Let's remove the unneccessary bytes
                 size_t allocLen = http_data->recvMsg.storedLen-index;
                 unsigned char* tmpBuff = (unsigned char*)malloc(allocLen);
-                memcpy(tmpBuff, http_data->recvMsg.storedBytes+index, allocLen);
-                free(http_data->recvMsg.storedBytes);
-                http_data->recvMsg.storedBytes = tmpBuff;
-                http_data->recvMsg.storedLen = allocLen;
+                if (tmpBuff == NULL)
+                {
+                    LogError("Failure reallocating buffer.");
+                    http_data->recvMsg.recvState = STATE_ERROR;
+                    execute_result = HTTPAPI_ALLOC_FAILED;
+                }
+                else
+                {
+                    memcpy(tmpBuff, http_data->recvMsg.storedBytes+index, allocLen);
+                    free(http_data->recvMsg.storedBytes);
+                    http_data->recvMsg.storedBytes = tmpBuff;
+                    http_data->recvMsg.storedLen = allocLen;
+                }
             }
         }
         if (http_data->recvMsg.recvState == STATE_RESPONSE_HEADER)
@@ -523,7 +574,7 @@ static void on_bytes_recv(void* context, const unsigned char* buffer, size_t len
                 }*/
             }
         }
-        /*if (http_data->recvMsg.recvState == STATE_MESSAGE_CHUNKED)
+        if (http_data->recvMsg.recvState == STATE_MESSAGE_CHUNKED)
         {
             // Chunked reply
             bool crlfEncounted = false;
@@ -533,7 +584,7 @@ static void on_bytes_recv(void* context, const unsigned char* buffer, size_t len
             const unsigned char* targetPos = http_data->recvMsg.storedBytes;
             const unsigned char* iterator = http_data->recvMsg.storedBytes;
 
-            for (index = 0; index < bytesLen; index++, bytesPos++, iterator++)
+            for (size_t index = 0; index < bytesLen; index++, bytesPos++, iterator++)
             {
                 if (*iterator == '\r')
                 {
@@ -562,8 +613,8 @@ static void on_bytes_recv(void* context, const unsigned char* buffer, size_t len
                             //    http_data->fnChunkReplyCallback((HTTP_CLIENT_HANDLE)data, http_data->userCtx, BUFFER_u_char(http_data->recvMsg.msgBody), BUFFER_length(http_data->recvMsg.msgBody), http_data->recvMsg.statusCode, http_data->recvMsg.respHeader, false);
                             //}
                             //index += chunkLen+2;
-                            //if (chunkLen != http_data->recvMsg.storedLen-index)
-                            //{
+                            if (chunkLen != http_data->recvMsg.storedLen-index)
+                            {
                                 // Let's remove the unneccessary bytes
                                 size_t allocLen = http_data->recvMsg.storedLen-chunkLen;
                                 unsigned char* tmpBuff = (unsigned char*)malloc(allocLen);
@@ -589,7 +640,7 @@ static void on_bytes_recv(void* context, const unsigned char* buffer, size_t len
                     }
                 }
             }
-        }*/
+        }
         if ( (http_data->recvMsg.requestType == HTTPAPI_REQUEST_HEAD && http_data->recvMsg.recvState == STATE_RESPONSE_HEADER) || 
             (http_data->recvMsg.recvState == STATE_MESSAGE_BODY) || 
             (http_data->recvMsg.recvState == STATE_ERROR) )
