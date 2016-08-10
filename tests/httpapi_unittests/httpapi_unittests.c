@@ -39,6 +39,17 @@ static void my_gballoc_free(void* ptr)
 
 #undef ENABLE_MOCKS
 
+/*#ifdef __cplusplus
+extern "C"
+{
+#endif
+
+    int STRING_sprintf(STRING_HANDLE handle, const char* format, ...);
+
+#ifdef __cplusplus
+}
+#endif*/
+
 static BUFFER_HANDLE my_BUFFER_new(void)
 {
     return (BUFFER_HANDLE)my_gballoc_malloc(1);
@@ -195,6 +206,20 @@ static int my_mallocAndStrcpy_s(char** destination, const char* source)
     return 0;
 }
 
+/*#ifdef __cplusplus
+extern "C"
+{
+#endif
+int STRING_sprintf(STRING_HANDLE handle, const char* format, ...)
+{
+    (void)handle;
+    (void)format;
+    return 0;
+}
+#ifdef __cplusplus
+}
+#endif*/
+
 DEFINE_ENUM_STRINGS(UMOCK_C_ERROR_CODE, UMOCK_C_ERROR_CODE_VALUES)
 
 static void on_umock_c_error(UMOCK_C_ERROR_CODE error_code)
@@ -202,6 +227,9 @@ static void on_umock_c_error(UMOCK_C_ERROR_CODE error_code)
     (void)error_code;
     ASSERT_FAIL("umock_c reported error");
 }
+
+//MOCK_STATIC_METHOD_3(, int, STRING_sprintf, STRING_HANDLE, handle, const char*, format, ...)
+//MOCK_METHOD_END(int, 0);
 
 BEGIN_TEST_SUITE(httpapi_unittests)
 
@@ -233,6 +261,7 @@ TEST_SUITE_INITIALIZE(suite_init)
     REGISTER_UMOCK_ALIAS_TYPE(HTTP_HEADERS_HANDLE, void*);
     REGISTER_UMOCK_ALIAS_TYPE(ON_IO_CLOSE_COMPLETE, void*);
     
+    //REGISTER_GLOBAL_MOCK_HOOK(STRING_sprintf, my_STRING_sprintf);
 
     REGISTER_GLOBAL_MOCK_HOOK(gballoc_malloc, my_gballoc_malloc);
     REGISTER_GLOBAL_MOCK_FAIL_RETURN(gballoc_malloc, NULL);
@@ -516,7 +545,7 @@ TEST_FUNCTION(httpapi_createconnection_succeed)
 /* Tests_SRS_HTTPAPI_07_003: [If any failure is encountered, HTTPAPI_CreateConnection shall return a NULL handle.] */
 /* Tests_SRS_HTTPAPI_07_003: [If any failure is encountered, HTTPAPI_CreateConnection shall return a NULL handle.] */
 /* Tests_SRS_HTTPAPI_07_003: [If any failure is encountered, HTTPAPI_CreateConnection shall return a NULL handle.] */
-TEST_FUNCTION(httpapi_createconnection_failures)
+TEST_FUNCTION(httpapi_createconnection_fail)
 {
     //arrange
     int negativeTestsInitResult = umock_c_negative_tests_init();

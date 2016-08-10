@@ -76,6 +76,8 @@ DEFINE_ENUM(HTTPAPI_REQUEST_TYPE, HTTPAPI_REQUEST_TYPE_VALUES);
 
 typedef void(*ON_EXECUTE_COMPLETE)(void* callback_context, HTTPAPI_RESULT execute_result, unsigned int statusCode, HTTP_HEADERS_HANDLE respHeader, CONSTBUFFER_HANDLE responseBuffer);
 
+#define MAX_HOSTNAME_LEN        65
+
 /**
  * @brief	Creates an HTTPS connection to the host specified by the @p
  * 			hostName parameter.

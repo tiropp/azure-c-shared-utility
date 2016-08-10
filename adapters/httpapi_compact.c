@@ -17,7 +17,6 @@
 #include "azure_c_shared_utility/strings.h"
 #include "azure_c_shared_utility/constbuffer.h"
 
-#define MAX_HOSTNAME_LEN        65
 #define TIME_MAX_BUFFER         16
 #define HTTP_SECURE_PORT        443
 #define HTTP_DEFAULT_PORT       80
@@ -824,41 +823,20 @@ static HTTPAPI_RESULT construct_http_headers(HTTPAPI_REQUEST_TYPE requestType, H
             }
             else
             {
-                size_t dataLen = strlen(header)+2;
-                char* sendData = malloc(dataLen+1);
-                if (sendData == NULL)
+                if (string_compare_case_insensitive(header, HTTP_CONTENT_LEN) == 0)
                 {
-                    /* Codes_SRS_HTTPAPI_07_029: [If an error is encountered during the construction of the http headers HTTPAPI_ExecuteRequestAsync shall return HTTPAPI_HTTP_HEADERS_FAILED.] */
-                    result = HTTPAPI_ALLOC_FAILED;
-                    LogError("Failed in allocating header data");
+                    contentLenFound = true;
                 }
-                else
+                else if (string_compare_case_insensitive(header, HTTP_HOST_HEADER) == 0)
                 {
-                    if (string_compare_case_insensitive(header, HTTP_CONTENT_LEN) == 0)
-                    {
-                        contentLenFound = true;
-                    }
-                    else if (string_compare_case_insensitive(header, HTTP_HOST_HEADER) == 0)
-                    {
-                        hostNameFound = true;
-                    }
+                    hostNameFound = true;
+                }
 
-                    if (snprintf(sendData, dataLen+1, "%s\r\n", header) < 0)
-                    {
-                        result = HTTPAPI_ERROR;
-                        LogError("Failed in constructing header data");
-                    }
-                    else
-                    {
-                        if (STRING_concat(http_preamble, sendData) != 0)
-                        {
-                            /* Codes_SRS_HTTPAPI_07_029: [If an error is encountered during the construction of the http headers HTTPAPI_ExecuteRequestAsync shall return HTTPAPI_HTTP_HEADERS_FAILED.] */
-                            result = HTTPAPI_HTTP_HEADERS_FAILED;
-                            LogError("Failed in building header data");
-                        }
-                    }
-                    free(sendData);
-                }
+                /*if (STRING_sprintf(http_preamble, "%s\r\n", header) < 0)
+                {
+                    result = HTTPAPI_ERROR;
+                    LogError("Failed in constructing header data");
+                }*/
                 free(header);
             }
         }
