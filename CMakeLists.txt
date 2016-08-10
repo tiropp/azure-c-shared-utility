@@ -35,7 +35,9 @@ if(MSVC)
 elseif(LINUX)
     set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Werror")
     set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -Werror")
-    set (CMAKE_C_FLAGS "-D_POSIX_SOURCE ${CMAKE_C_FLAGS}")
+    if(NOT IN_OPENWRT)
+        set (CMAKE_C_FLAGS "-D_POSIX_C_SOURCE=200112L ${CMAKE_C_FLAGS}")
+    endif()
 endif()
 
 
@@ -283,7 +285,7 @@ function(build_test_artifacts whatIsBuilding use_gballoc)
     #setting output type
     if(WIN32)
         if(
-            (("${whatIsBuilding}" MATCHES ".*unittests.*") AND ${skip_unittests})
+            (("${whatIsBuilding}" MATCHES ".*ut.*") AND ${skip_unittests})
         )
         else()
             windows_unittests_add_exe(${whatIsBuilding} ${ARGN})
@@ -291,7 +293,7 @@ function(build_test_artifacts whatIsBuilding use_gballoc)
         endif()
     else()
         if(
-            (("${whatIsBuilding}" MATCHES ".*unittests.*") AND ${skip_unittests})
+            (("${whatIsBuilding}" MATCHES ".*ut.*") AND ${skip_unittests})
         )
         else()
             linux_unittests_add_exe(${whatIsBuilding} ${ARGN})
@@ -461,7 +463,7 @@ function(build_c_test_artifacts whatIsBuilding use_gballoc folder)
     #setting output type
     if(WIN32)
         if(
-            (("${whatIsBuilding}" MATCHES ".*unittests.*") AND ${skip_unittests})
+            (("${whatIsBuilding}" MATCHES ".*ut.*") AND ${skip_unittests})
         )
         else()
             c_windows_unittests_add_dll(${whatIsBuilding} ${folder} ${ARGN})
@@ -469,7 +471,7 @@ function(build_c_test_artifacts whatIsBuilding use_gballoc folder)
         endif()
     else()
         if(
-            (("${whatIsBuilding}" MATCHES ".*unittests.*") AND ${skip_unittests})
+            (("${whatIsBuilding}" MATCHES ".*ut.*") AND ${skip_unittests})
         )
         else()
             c_linux_unittests_add_exe(${whatIsBuilding} ${folder} ${ARGN})
@@ -610,6 +612,7 @@ set(source_h_files
 ./inc/azure_c_shared_utility/refcount.h
 ./inc/azure_c_shared_utility/sastoken.h
 ./inc/azure_c_shared_utility/sha-private.h
+./inc/azure_c_shared_utility/shared_util_options.h
 ./inc/azure_c_shared_utility/sha.h
 ./inc/azure_c_shared_utility/socketio.h
 ./inc/azure_c_shared_utility/stdint_ce6.h
