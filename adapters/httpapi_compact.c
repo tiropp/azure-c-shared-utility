@@ -16,6 +16,7 @@
 #include "azure_c_shared_utility/xio.h"
 #include "azure_c_shared_utility/strings.h"
 #include "azure_c_shared_utility/constbuffer.h"
+#include "azure_c_shared_utility/shared_util_options.h"
 
 #define TIME_MAX_BUFFER         16
 #define HTTP_SECURE_PORT        443
@@ -73,6 +74,10 @@ typedef struct HTTP_HANDLE_DATA_TAG
     unsigned int is_io_error : 1;
     unsigned int is_connected : 1;
     bool logTrace;
+    char* proxy_address;
+    int proxy_port;
+    char* proxy_username;
+    char* proxy_password;
 } HTTP_HANDLE_DATA;
 
 static void get_log_time(char* timeResult, size_t len)
@@ -442,7 +447,8 @@ static void on_bytes_recv(void* context, const unsigned char* buffer, size_t len
 
                 if (initialize_recv_message(&http_data->recvMsg) != 0)
                 {
-
+                    execute_result = HTTPAPI_INIT_FAILED;
+                    http_data->recvMsg.recvState = STATE_ERROR;
                 }
             }
         }
@@ -832,11 +838,11 @@ static HTTPAPI_RESULT construct_http_headers(HTTPAPI_REQUEST_TYPE requestType, H
                     hostNameFound = true;
                 }
 
-                /*if (STRING_sprintf(http_preamble, "%s\r\n", header) < 0)
+                if (STRING_sprintf(http_preamble, "%s\r\n", header) < 0)
                 {
                     result = HTTPAPI_ERROR;
                     LogError("Failed in constructing header data");
-                }*/
+                }
                 free(header);
             }
         }
@@ -858,32 +864,10 @@ static HTTPAPI_RESULT construct_http_headers(HTTPAPI_REQUEST_TYPE requestType, H
                 /* Codes_SRS_HTTPAPI_07_011: [If the requestType parameter is of type POST and the Content-Length not supplied HTTPAPI_ExecuteRequestAsync shall add the Content-Length header (rfc7230 3.3.2).] */
                 if (!contentLenFound && (contentLen > 0 || requestType == HTTPAPI_REQUEST_POST) )
                 {
-                    size_t fmtLen = strlen(HTTP_CONTENT_LEN)+strlen(HTTP_CRLF_VALUE)+10;
-                    char* content = malloc(fmtLen+1);
-                    if (content == NULL)
+                    if (STRING_sprintf(http_preamble, "%s: %d%s", HTTP_CONTENT_LEN, (int)contentLen, HTTP_CRLF_VALUE) != 0)
                     {
-                        /* Codes_SRS_HTTPAPI_07_029: [If an error is encountered during the construction of the http headers HTTPAPI_ExecuteRequestAsync shall return HTTPAPI_HTTP_HEADERS_FAILED.] */
                         result = HTTPAPI_HTTP_HEADERS_FAILED;
-                        LogError("Failed allocating content len header data");
-                    }
-                    else
-                    {
-                        if (sprintf(content, "%s: %d%s", HTTP_CONTENT_LEN, (int)contentLen, HTTP_CRLF_VALUE) <= 0)
-                        {
-                            /* Codes_SRS_HTTPAPI_07_029: [If an error is encountered during the construction of the http headers HTTPAPI_ExecuteRequestAsync shall return HTTPAPI_HTTP_HEADERS_FAILED.] */
-                            result = HTTPAPI_HTTP_HEADERS_FAILED;
-                            LogError("Failed constructing content len header data");
-                        }
-                        else
-                        {
-                            if (STRING_concat(http_preamble, content) != 0)
-                            {
-                                /* Codes_SRS_HTTPAPI_07_029: [If an error is encountered during the construction of the http headers HTTPAPI_ExecuteRequestAsync shall return HTTPAPI_HTTP_HEADERS_FAILED.] */
-                                result = HTTPAPI_HTTP_HEADERS_FAILED;
-                                LogError("Failed building content len header data");
-                            }
-                        }
-                        free(content);
+                        LogError("Failed constructing content len header data");
                     }
                 }
             }
@@ -893,61 +877,18 @@ static HTTPAPI_RESULT construct_http_headers(HTTPAPI_REQUEST_TYPE requestType, H
             {
                 if (requestType == HTTPAPI_REQUEST_CONNECT)
                 {
-                    size_t fmtLen = strlen(HTTP_HOST_HEADER)+strlen(HTTP_CRLF_VALUE)+strlen(hostname)+PORT_NUM_LEN;
-                    char* content = malloc(fmtLen+1);
-                    if (content == NULL)
+                    if (STRING_sprintf(http_preamble, "%s: %s:%d%s", HTTP_HOST_HEADER, hostname, port, HTTP_CRLF_VALUE) != 0)
                     {
-                        /* Codes_SRS_HTTPAPI_07_029: [If an error is encountered during the construction of the http headers HTTPAPI_ExecuteRequestAsync shall return HTTPAPI_HTTP_HEADERS_FAILED.] */
                         result = HTTPAPI_HTTP_HEADERS_FAILED;
-                        LogError("Failed allocating content len header data");
-                    }
-                    else
-                    {
-                        if (sprintf(content, "%s: %s:%d%s", HTTP_HOST_HEADER, hostname, port, HTTP_CRLF_VALUE) <= 0)
-                        {
-                            /* Codes_SRS_HTTPAPI_07_029: [If an error is encountered during the construction of the http headers HTTPAPI_ExecuteRequestAsync shall return HTTPAPI_HTTP_HEADERS_FAILED.] */
-                            result = HTTPAPI_HTTP_HEADERS_FAILED;
-                            LogError("Failed constructing content len header data");
-                        }
-                        else
-                        {
-                            if (STRING_concat(http_preamble, content) != 0)
-                            {
-                                /* Codes_SRS_HTTPAPI_07_029: [If an error is encountered during the construction of the http headers HTTPAPI_ExecuteRequestAsync shall return HTTPAPI_HTTP_HEADERS_FAILED.] */
-                                result = HTTPAPI_HTTP_HEADERS_FAILED;
-                                LogError("Failed building content len header data");
-                            }
-                        }
-                        free(content);
+                        LogError("Failed constructing content len header data");
                     }
                 }
                 else
                 {
-                    size_t fmtLen = strlen(HTTP_HOST_HEADER)+strlen(HTTP_CRLF_VALUE)+strlen(hostname)+2;
-                    char* content = malloc(fmtLen+1);
-                    if (content == NULL)
+                    if (STRING_sprintf(http_preamble, "%s: %s%s", HTTP_HOST_HEADER, hostname, HTTP_CRLF_VALUE) != 0)
                     {
                         result = HTTPAPI_HTTP_HEADERS_FAILED;
-                        LogError("Failed allocating content len header data");
-                    }
-                    else
-                    {
-                        if (sprintf(content, "%s: %s%s", HTTP_HOST_HEADER, hostname, HTTP_CRLF_VALUE) <= 0)
-                        {
-                            /* Codes_SRS_HTTPAPI_07_029: [If an error is encountered during the construction of the http headers HTTPAPI_ExecuteRequestAsync shall return HTTPAPI_HTTP_HEADERS_FAILED.] */
-                            result = HTTPAPI_HTTP_HEADERS_FAILED;
-                            LogError("Failed constructing content len header data");
-                        }
-                        else
-                        {
-                            if (STRING_concat(http_preamble, content) != 0)
-                            {
-                                /* Codes_SRS_HTTPAPI_07_029: [If an error is encountered during the construction of the http headers HTTPAPI_ExecuteRequestAsync shall return HTTPAPI_HTTP_HEADERS_FAILED.] */
-                                result = HTTPAPI_HTTP_HEADERS_FAILED;
-                                LogError("Failed building content len header data");
-                            }
-                        }
-                        free(content);
+                        LogError("Failed constructing content len header data");
                     }
                 }
             }
@@ -1058,6 +999,11 @@ HTTP_HANDLE HTTPAPI_CreateConnection(XIO_HANDLE xio, const char* hostName, int p
                 memset(&http_data->recvMsg, 0, sizeof(HTTP_RECV_DATA) );
                 http_data->recvMsg.recvState = STATE_COMPLETE;
                 http_data->recvMsg.chunkedReply = false;
+                http_data->proxy_address = NULL;
+                http_data->proxy_port = 0;
+                http_data->proxy_username = NULL;
+                http_data->proxy_password = NULL;
+
 
             }
         }
@@ -1084,6 +1030,18 @@ void HTTPAPI_CloseConnection(HTTP_HANDLE handle)
         if (http_data->hostname)
         {
             free(http_data->hostname);
+        }
+        if (http_data->proxy_address)
+        {
+            free(http_data->proxy_address);
+        }
+        if (http_data->proxy_username)
+        {
+            free(http_data->proxy_username);
+        }
+        if (http_data->proxy_password)
+        {
+            free(http_data->proxy_password);
         }
         free(http_data);
     }
@@ -1196,6 +1154,33 @@ HTTPAPI_RESULT HTTPAPI_SetOption(HTTP_HANDLE handle, const char* optionName, con
             result = HTTPAPI_OK;
         }
     }
+    else if (strcmp(OPTION_HTTP_PROXY, optionName) == 0)
+    {
+        if (value == NULL)
+        {
+            result = HTTPAPI_INVALID_ARG;
+        }
+        else
+        {
+            HTTP_HANDLE_DATA* http_data = (HTTP_HANDLE_DATA*)handle;
+            HTTP_PROXY_OPTIONS* proxy_data = (HTTP_PROXY_OPTIONS*)value;
+            if (proxy_data->host_address == NULL || (proxy_data->username != NULL && proxy_data->password == NULL) )
+            {
+                result = HTTPAPI_INVALID_ARG;
+            }
+            else
+            {
+                mallocAndStrcpy_s(&http_data->proxy_address, proxy_data->host_address);
+                http_data->proxy_port = proxy_data->port;
+                if (proxy_data->username)
+                {
+                    mallocAndStrcpy_s(&http_data->proxy_username, proxy_data->username);
+                    mallocAndStrcpy_s(&http_data->proxy_password, proxy_data->password);
+                }
+                result = HTTPAPI_OK;
+            }
+        }
+    }
     else
     {
         /* Codes_SRS_HTTPAPI_07_019: [If HTTPAPI_SetOption encounteres a optionName that is not recognized HTTPAPI_SetOption shall return HTTP_CLIENT_INVALID_ARG.] */
@@ -1228,6 +1213,26 @@ HTTPAPI_RESULT HTTPAPI_CloneOption(const char* optionName, const void* value, co
             /* Codes_SRS_HTTPAPI_07_020: [HTTPAPI_CloneOption shall clone the specified optionName value into the savedValue parameter.] */
             *tempLogTrace = value;
             *savedValue = tempLogTrace;
+            result = HTTPAPI_OK;
+        }
+    }
+    else if (strcmp(OPTION_HTTP_PROXY, optionName) == 0)
+    {
+        HTTP_PROXY_OPTIONS* proxy_data = (HTTP_PROXY_OPTIONS*)value;
+
+        HTTP_PROXY_OPTIONS* new_proxy_info = malloc(sizeof(HTTP_PROXY_OPTIONS));
+        if (new_proxy_info == NULL)
+        {
+            LogError("unable to allocate proxy option information");
+            result = HTTPAPI_ERROR;
+        }
+        else
+        {
+            new_proxy_info->host_address = proxy_data->host_address;
+            new_proxy_info->port = proxy_data->port;
+            new_proxy_info->password = proxy_data->password;
+            new_proxy_info->username = proxy_data->username;
+            *savedValue = new_proxy_info;
             result = HTTPAPI_OK;
         }
     }

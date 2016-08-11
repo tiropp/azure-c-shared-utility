@@ -74,19 +74,9 @@ DEFINE_ENUM(HTTPAPI_RESULT, HTTPAPI_RESULT_VALUES);
  */
 DEFINE_ENUM(HTTPAPI_REQUEST_TYPE, HTTPAPI_REQUEST_TYPE_VALUES);
 
-
-/**
- * @brief	Global initialization for the HTTP API component.
- *
- *			Platform specific implementations are expected to initialize
- *			the underlying HTTP API stacks.
- * 
- * @return	@c HTTPAPI_OK if initialization is successful or an error
- * 			code in case it fails.
- */
-MOCKABLE_FUNCTION(, HTTPAPI_RESULT, HTTPAPI_Init);
-
 #define MAX_HOSTNAME_LEN        65
+
+typedef void(*ON_EXECUTE_COMPLETE)(void* callback_context, HTTPAPI_RESULT execute_result, unsigned int statusCode, HTTP_HEADERS_HANDLE respHeader, CONSTBUFFER_HANDLE responseBuffer);
 
 /**
  * @brief	Creates an HTTPS connection to the host specified by the @p

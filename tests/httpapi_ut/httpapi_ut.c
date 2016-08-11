@@ -39,7 +39,7 @@ static void my_gballoc_free(void* ptr)
 
 #undef ENABLE_MOCKS
 
-/*#ifdef __cplusplus
+#ifdef __cplusplus
 extern "C"
 {
 #endif
@@ -48,7 +48,7 @@ extern "C"
 
 #ifdef __cplusplus
 }
-#endif*/
+#endif
 
 static BUFFER_HANDLE my_BUFFER_new(void)
 {
@@ -206,7 +206,7 @@ static int my_mallocAndStrcpy_s(char** destination, const char* source)
     return 0;
 }
 
-/*#ifdef __cplusplus
+#ifdef __cplusplus
 extern "C"
 {
 #endif
@@ -218,7 +218,7 @@ int STRING_sprintf(STRING_HANDLE handle, const char* format, ...)
 }
 #ifdef __cplusplus
 }
-#endif*/
+#endif
 
 DEFINE_ENUM_STRINGS(UMOCK_C_ERROR_CODE, UMOCK_C_ERROR_CODE_VALUES)
 
@@ -227,9 +227,6 @@ static void on_umock_c_error(UMOCK_C_ERROR_CODE error_code)
     (void)error_code;
     ASSERT_FAIL("umock_c reported error");
 }
-
-//MOCK_STATIC_METHOD_3(, int, STRING_sprintf, STRING_HANDLE, handle, const char*, format, ...)
-//MOCK_METHOD_END(int, 0);
 
 BEGIN_TEST_SUITE(httpapi_unittests)
 
@@ -261,8 +258,6 @@ TEST_SUITE_INITIALIZE(suite_init)
     REGISTER_UMOCK_ALIAS_TYPE(HTTP_HEADERS_HANDLE, void*);
     REGISTER_UMOCK_ALIAS_TYPE(ON_IO_CLOSE_COMPLETE, void*);
     
-    //REGISTER_GLOBAL_MOCK_HOOK(STRING_sprintf, my_STRING_sprintf);
-
     REGISTER_GLOBAL_MOCK_HOOK(gballoc_malloc, my_gballoc_malloc);
     REGISTER_GLOBAL_MOCK_FAIL_RETURN(gballoc_malloc, NULL);
     REGISTER_GLOBAL_MOCK_HOOK(gballoc_free, my_gballoc_free);
@@ -278,6 +273,7 @@ TEST_SUITE_INITIALIZE(suite_init)
     REGISTER_GLOBAL_MOCK_HOOK(HTTPHeaders_GetHeader, my_HTTPHeaders_GetHeader);
     REGISTER_GLOBAL_MOCK_FAIL_RETURN(HTTPHeaders_GetHeader, HTTP_HEADERS_ERROR);
     REGISTER_GLOBAL_MOCK_HOOK(HTTPHeaders_GetHeaderCount, my_HTTPHeaders_GetHeaderCount);
+    REGISTER_GLOBAL_MOCK_FAIL_RETURN(HTTPHeaders_GetHeaderCount, HTTP_HEADERS_ERROR);
 
     REGISTER_GLOBAL_MOCK_HOOK(BUFFER_new, my_BUFFER_new);
     REGISTER_GLOBAL_MOCK_FAIL_RETURN(BUFFER_new, NULL);
@@ -372,10 +368,7 @@ static void setup_httpapi_executerequestasync_mocks()
 {
     EXPECTED_CALL(gballoc_malloc(IGNORED_NUM_ARG));
     EXPECTED_CALL(STRING_construct(IGNORED_NUM_ARG));
-    EXPECTED_CALL(gballoc_malloc(IGNORED_NUM_ARG));
     EXPECTED_CALL(STRING_concat(IGNORED_NUM_ARG, IGNORED_NUM_ARG));
-    EXPECTED_CALL(gballoc_free(IGNORED_PTR_ARG));
-    EXPECTED_CALL(STRING_concat(IGNORED_PTR_ARG, IGNORED_PTR_ARG));
     EXPECTED_CALL(STRING_c_str(IGNORED_PTR_ARG));
     STRICT_EXPECTED_CALL(xio_send(TEST_IO_HANDLE, IGNORED_PTR_ARG, IGNORED_NUM_ARG, IGNORED_NUM_ARG, IGNORED_PTR_ARG))
         .IgnoreArgument(2)
@@ -395,21 +388,12 @@ static void setup_httpapi_executerequestasync_with_header_mocks(size_t header_co
     for (size_t index = 0; index < header_count; index++)
     {
         EXPECTED_CALL(HTTPHeaders_GetHeader(TEST_HEADER_HANDLE, 0, IGNORED_PTR_ARG));
-        EXPECTED_CALL(gballoc_malloc(IGNORED_NUM_ARG));
-        EXPECTED_CALL(STRING_concat(IGNORED_NUM_ARG, IGNORED_NUM_ARG));
-        EXPECTED_CALL(gballoc_free(IGNORED_PTR_ARG));
         EXPECTED_CALL(gballoc_free(IGNORED_PTR_ARG));
     }
 
-    EXPECTED_CALL(gballoc_malloc(IGNORED_NUM_ARG));
-    EXPECTED_CALL(STRING_concat(IGNORED_NUM_ARG, IGNORED_NUM_ARG));
-    EXPECTED_CALL(gballoc_free(IGNORED_PTR_ARG));
-
     if (content_len_included)
     {
-        EXPECTED_CALL(gballoc_malloc(IGNORED_NUM_ARG));
-        EXPECTED_CALL(STRING_concat(IGNORED_PTR_ARG, IGNORED_PTR_ARG));
-        EXPECTED_CALL(gballoc_free(IGNORED_PTR_ARG));
+        // Can not mock STRING_sprintf because of the ...
     }
 
     EXPECTED_CALL(STRING_concat(IGNORED_PTR_ARG, IGNORED_PTR_ARG));
@@ -714,7 +698,7 @@ TEST_FUNCTION(httpapi_executerequestasync_GET_failures)
 
     umock_c_negative_tests_snapshot();
 
-    size_t calls_cannot_fail[] = { 4, 6, 8, 9 };
+    size_t calls_cannot_fail[] = { 3, 5, 6 };
 
     //act
     size_t count = umock_c_negative_tests_call_count();
@@ -877,7 +861,7 @@ TEST_FUNCTION(httpapi_executerequestasync_HEAD_type_failures)
 
     umock_c_negative_tests_snapshot();
 
-    size_t calls_cannot_fail[] ={ 4, 6, 8, 9 };
+    size_t calls_cannot_fail[] ={ 3, 5, 6 };
 
     //act
     size_t count = umock_c_negative_tests_call_count();
@@ -945,7 +929,7 @@ TEST_FUNCTION(httpapi_executerequestasync_POST_failure)
 
     umock_c_negative_tests_snapshot();
 
-    size_t calls_cannot_fail[] = { 2, 6, 7, 10, 13, 15, 17, 18 };
+    size_t calls_cannot_fail[] = { 6, 4, 8, 9 };
 
     //act
     size_t count = umock_c_negative_tests_call_count();
@@ -1052,7 +1036,7 @@ TEST_FUNCTION(httpapi_executerequestasync_CONNECT_failures)
 
     umock_c_negative_tests_snapshot();
 
-    size_t calls_cannot_fail[] = { 4, 6, 8, 9 };
+    size_t calls_cannot_fail[] = { 3, 5, 6 };
 
     //act
     size_t count = umock_c_negative_tests_call_count();
@@ -1067,7 +1051,7 @@ TEST_FUNCTION(httpapi_executerequestasync_CONNECT_failures)
         umock_c_negative_tests_fail_call(index);
 
         char tmp_msg[64];
-        sprintf(tmp_msg, "httpapi_executerequestasync_POST failure in test %zu/%zu", index, count);
+        sprintf(tmp_msg, "httpapi_executerequestasync_CONNECT failure in test %zu/%zu", index+1, count);
 
         //act
         HTTPAPI_RESULT http_result = HTTPAPI_ExecuteRequestAsync(handle, HTTPAPI_REQUEST_CONNECT, TEST_RELATIVE_PATH, NULL, NULL, 0, my_on_execute_complete, NULL);
@@ -1464,7 +1448,7 @@ TEST_FUNCTION(httpapi_on_bytes_recv_GET_failure)
 
     umock_c_negative_tests_snapshot();
 
-    size_t calls_cannot_fail[] = { 0 };
+    //size_t calls_cannot_fail[] = { 0 };
 
     ASSERT_IS_NOT_NULL(g_on_bytes_recv);
     ASSERT_IS_NOT_NULL(g_on_bytes_recv_ctx);
@@ -1473,16 +1457,16 @@ TEST_FUNCTION(httpapi_on_bytes_recv_GET_failure)
     size_t count = umock_c_negative_tests_call_count();
     for (size_t index = 0; index < count; index++)
     {
-        if (should_skip_index(index, calls_cannot_fail, sizeof(calls_cannot_fail)/sizeof(calls_cannot_fail[0])) != 0)
+        //if (should_skip_index(index, calls_cannot_fail, sizeof(calls_cannot_fail)/sizeof(calls_cannot_fail[0])) != 0)
         {
-            continue;
+            //continue;
         }
 
         umock_c_negative_tests_reset();
         umock_c_negative_tests_fail_call(index);
 
         char tmp_msg[64];
-        sprintf(tmp_msg, "httpapi_on_bytes_recv_GET failure in test %zu", index);
+        sprintf(tmp_msg, "httpapi_on_bytes_recv_GET failure in test %zu/%zu", index+1, count);
 
         g_on_bytes_recv(g_on_bytes_recv_ctx, buffer, buffer_len);
 
