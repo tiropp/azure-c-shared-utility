@@ -38,6 +38,7 @@ if(${use_openssl})
 add_subdirectory(x509_openssl_ut)
 endif()
 
+add_subdirectory(queue_ut)
 add_subdirectory(string_tokenizer_ut)
 add_subdirectory(strings_ut)
 add_subdirectory(tickcounter_ut)

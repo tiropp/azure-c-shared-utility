@@ -598,6 +598,7 @@ set(source_c_files
 ./src/xio.c
 ./src/list.c
 ./src/map.c
+./src/queue.c
 ./src/sastoken.c
 ./src/sha1.c
 ./src/sha224.c
@@ -667,6 +668,7 @@ set(source_h_files
 ./inc/azure_c_shared_utility/map.h
 ./inc/azure_c_shared_utility/platform.h
 ./inc/azure_c_shared_utility/refcount.h
+./inc/azure_c_shared_utility/queue.h
 ./inc/azure_c_shared_utility/sastoken.h
 ./inc/azure_c_shared_utility/sha-private.h
 ./inc/azure_c_shared_utility/shared_util_options.h
