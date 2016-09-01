@@ -4,3 +4,6 @@
 cmake_minimum_required(VERSION 2.8.11)
 
 add_subdirectory(azure_c_shared_hello_world)
+if(${use_wsio})
+add_subdirectory(wsio_connect)
+endif()

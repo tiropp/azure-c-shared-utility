@@ -800,6 +800,8 @@ if(LINUX)
     target_link_libraries(aziotsharedutil m)
 endif()
 
+add_subdirectory(samples)
+
 if (NOT ${skip_unittests})
     add_subdirectory(testtools)
     add_subdirectory(tests)
