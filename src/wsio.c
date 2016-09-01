@@ -543,7 +543,7 @@ OPTIONHANDLER_HANDLE wsio_retrieveoptions(CONCRETE_IO_HANDLE handle)
             }
             else if ( 
                 (wsio_instance->proxy_port != 0) && 
-                (OptionHandler_AddOption(result, OPTION_PROXY_PORT, &wsio_instance->port) != 0)
+                (OptionHandler_AddOption(result, OPTION_PROXY_PORT, &wsio_instance->proxy_port) != 0)
                 )
             {
                 LogError("unable to save proxy_port option");
