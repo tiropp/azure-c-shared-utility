@@ -49,7 +49,7 @@ add_subdirectory(xio_ut)
 add_subdirectory(optionhandler_ut)
 
 if(use_wsio)
-    add_subdirectory(wsio_ut)
+#    add_subdirectory(wsio_ut)
 endif()
 
 #Add adapters tests
