@@ -150,6 +150,7 @@ CONCRETE_IO_HANDLE wsio_create(void* io_create_parameters)
             result->on_io_error_context = NULL;
             result->proxy_address = NULL;
             result->proxy_port = 0;
+            result->underlying_io = ws_io_config->underlying_io;
 
             result->pending_io_list = list_create();
             if (result->pending_io_list == NULL)
@@ -169,12 +170,20 @@ CONCRETE_IO_HANDLE wsio_create(void* io_create_parameters)
 
 static void on_underlying_io_open_complete(void* context, IO_OPEN_RESULT open_result)
 {
+    WSIO_INSTANCE* wsio_instance = (WSIO_INSTANCE*)context;
     (void)context, open_result;
+    const char upgrade_request[] = "GET /chat HTTP/1.1\r\n\r\n";
+
+    if (xio_send(wsio_instance->underlying_io, upgrade_request, sizeof(upgrade_request), NULL, NULL) != 0)
+    {
+        LogError("Error sending upgrade request");
+    }
 }
 
 static void on_underlying_io_bytes_received(void* context, const unsigned char* buffer, size_t size)
 {
     (void)context, buffer, size;
+    LogInfo("Received %zu bytes", size);
 }
 
 static void on_underlying_io_error(void* context)
@@ -348,7 +357,7 @@ void wsio_dowork(CONCRETE_IO_HANDLE ws_io)
         if ((wsio_instance->io_state == IO_STATE_OPEN) ||
             (wsio_instance->io_state == IO_STATE_OPENING))
         {
-            /* do work */
+            xio_dowork(wsio_instance->underlying_io);
         }
     }
 }

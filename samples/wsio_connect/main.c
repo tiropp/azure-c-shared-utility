@@ -7,6 +7,22 @@
 #include "azure_c_shared_utility\tlsio.h"
 #include "azure_c_shared_utility\platform.h"
 
+static void on_io_open_complete(void* context, IO_OPEN_RESULT open_result)
+{
+    (void)context, open_result;
+}
+
+static void on_io_bytes_received(void* context, const unsigned char* buffer, size_t size)
+{
+    (void)context, buffer, size;
+}
+
+static void on_io_error(void* context)
+{
+    (void)context;
+}
+
+
 int main(int argc, void** argv)
 {
     XIO_HANDLE wsio;
@@ -61,7 +77,20 @@ int main(int argc, void** argv)
                     }
                     else
                     {
-                        result = 0;
+                        if (xio_open(wsio, on_io_open_complete, wsio, on_io_bytes_received, wsio, on_io_error, wsio) != 0)
+                        {
+                            (void)printf("Error opening wsio.");
+                            result = __LINE__;
+                        }
+                        else
+                        {
+                            while (1)
+                            {
+                                xio_dowork(wsio);
+                            }
+
+                            result = 0;
+                        }
                     }
                 }
 
