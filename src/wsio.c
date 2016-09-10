@@ -50,6 +50,8 @@ typedef struct WSIO_INSTANCE_TAG
     char* proxy_address;
     int proxy_port;
     XIO_HANDLE underlying_io;
+    size_t received_byte_count;
+    unsigned char* received_bytes;
 } WSIO_INSTANCE;
 
 static void indicate_error(WSIO_INSTANCE* wsio_instance)
@@ -128,6 +130,11 @@ static int remove_pending_io(WSIO_INSTANCE* wsio_instance, LIST_ITEM_HANDLE item
     return result;
 }
 
+static send_pending_ios(WSIO_INSTANCE* wsio_instance)
+{
+
+}
+
 CONCRETE_IO_HANDLE wsio_create(void* io_create_parameters)
 {
     WSIO_CONFIG* ws_io_config = io_create_parameters;
@@ -153,22 +160,32 @@ CONCRETE_IO_HANDLE wsio_create(void* io_create_parameters)
             result->on_io_error_context = NULL;
             result->proxy_address = NULL;
             result->proxy_port = 0;
+            result->received_bytes = NULL;
+            result->received_byte_count = 0;
             result->underlying_io = ws_io_config->underlying_io;
 
             hostname_length = strlen(ws_io_config->hostname);
             result->hostname = malloc(hostname_length + 1);
-
-            (void)memcpy(result->hostname, ws_io_config->hostname, hostname_length + 1);
-
-            result->pending_io_list = list_create();
-            if (result->pending_io_list == NULL)
+            if (result->hostname == NULL)
             {
                 free(result);
                 result = NULL;
             }
             else
             {
-                result->io_state = IO_STATE_NOT_OPEN;
+                (void)memcpy(result->hostname, ws_io_config->hostname, hostname_length + 1);
+
+                result->pending_io_list = list_create();
+                if (result->pending_io_list == NULL)
+                {
+                    free(result->hostname);
+                    free(result);
+                    result = NULL;
+                }
+                else
+                {
+                    result->io_state = IO_STATE_NOT_OPEN;
+                }
             }
         }
     }
@@ -185,6 +202,7 @@ static void on_underlying_io_open_complete(void* context, IO_OPEN_RESULT open_re
         "Content-length: 0\r\n"
         "Upgrade: websocket\r\n"
         "Connection: Upgrade\r\n"
+        "Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\n"
         "Sec-WebSocket-Protocol: AMQPWSB10\r\n"
         "Sec-WebSocket-Version: 13\r\n"
         "\r\n";
@@ -200,9 +218,71 @@ static void on_underlying_io_open_complete(void* context, IO_OPEN_RESULT open_re
 
 static void on_underlying_io_bytes_received(void* context, const unsigned char* buffer, size_t size)
 {
-    (void)context, buffer, size;
+    WSIO_INSTANCE* wsio_instance = (WSIO_INSTANCE*)context;
+
+    (void)buffer, size;
     LogInfo("Received %zu bytes", size);
-    LogInfo("Received %s bytes", buffer);
+
+    unsigned char* new_received_bytes = (unsigned char*)realloc(wsio_instance->received_bytes, wsio_instance->received_byte_count + size);
+    if (new_received_bytes == NULL)
+    {
+        /* error */
+    }
+    else
+    {
+        size_t pos = 0;
+        size_t last_pos = 0;
+        unsigned char done = 0;
+
+        wsio_instance->received_bytes = new_received_bytes;
+        (void)memcpy(wsio_instance->received_bytes, buffer, size);
+        wsio_instance->received_byte_count += size;
+
+        while (done == 0)
+        {
+            /* parse the Upgrade */
+            while ((pos < wsio_instance->received_byte_count) &&
+                (wsio_instance->received_bytes[pos] != '\r'))
+            {
+                pos++;
+            }
+
+            if (pos == wsio_instance->received_byte_count)
+            {
+                break;
+            }
+
+            if (pos - last_pos == 0)
+            {
+                done = 1;
+            }
+            else
+            {
+                pos++;
+
+                while ((pos < wsio_instance->received_byte_count) &&
+                    (wsio_instance->received_bytes[pos] == '\n'))
+                {
+                    pos++;
+                }
+
+                if (pos == wsio_instance->received_byte_count)
+                {
+                    break;
+                }
+
+                last_pos = pos;
+            }
+        }
+
+        if (done)
+        {
+            /* parsed the upgrade response ... we assume */
+            LogInfo("Got WS upgrade response");
+            wsio_instance->io_state = IO_STATE_OPEN;
+            indicate_open_complete(wsio_instance, IO_OPEN_OK);
+        }
+    }
 }
 
 static void on_underlying_io_error(void* context)
@@ -332,6 +412,10 @@ void wsio_destroy(CONCRETE_IO_HANDLE ws_io)
         {
             free(wsio_instance->hostname);
         }
+        if (wsio_instance->received_bytes != NULL)
+        {
+            free(wsio_instance->received_bytes);
+        }
 
         free(ws_io);
     }
@@ -364,6 +448,8 @@ int wsio_send(CONCRETE_IO_HANDLE ws_io, const void* buffer, size_t size, ON_SEND
             else
             {
                 /* I guess send here */
+
+
                 result = 0;
             }
         }
