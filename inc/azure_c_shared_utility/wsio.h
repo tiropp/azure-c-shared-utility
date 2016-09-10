@@ -18,6 +18,7 @@ extern "C" {
 
 typedef struct WSIO_CONFIG_TAG
 {
+    const char* hostname;
     XIO_HANDLE underlying_io;
 } WSIO_CONFIG;
 

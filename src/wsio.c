@@ -46,6 +46,7 @@ typedef struct WSIO_INSTANCE_TAG
     void* on_io_error_context;
     IO_STATE io_state;
     LIST_HANDLE pending_io_list;
+    char* hostname;
     char* proxy_address;
     int proxy_port;
     XIO_HANDLE underlying_io;
@@ -142,6 +143,8 @@ CONCRETE_IO_HANDLE wsio_create(void* io_create_parameters)
         result = (WSIO_INSTANCE*)malloc(sizeof(WSIO_INSTANCE));
         if (result != NULL)
         {
+            size_t hostname_length;
+
             result->on_bytes_received = NULL;
             result->on_bytes_received_context = NULL;
             result->on_io_open_complete = NULL;
@@ -151,6 +154,11 @@ CONCRETE_IO_HANDLE wsio_create(void* io_create_parameters)
             result->proxy_address = NULL;
             result->proxy_port = 0;
             result->underlying_io = ws_io_config->underlying_io;
+
+            hostname_length = strlen(ws_io_config->hostname);
+            result->hostname = malloc(hostname_length + 1);
+
+            (void)memcpy(result->hostname, ws_io_config->hostname, hostname_length + 1);
 
             result->pending_io_list = list_create();
             if (result->pending_io_list == NULL)
@@ -172,13 +180,19 @@ static void on_underlying_io_open_complete(void* context, IO_OPEN_RESULT open_re
 {
     WSIO_INSTANCE* wsio_instance = (WSIO_INSTANCE*)context;
     (void)context, open_result;
-    const char upgrade_request[] = "GET /chat HTTP/1.1\r\n"
+    const char upgrade_request_format[] = "GET /$iothub/websocket HTTP/1.1\r\n"
+        "Host: %s\r\n"
+        "Content-length: 0\r\n"
         "Upgrade: websocket\r\n"
         "Connection: Upgrade\r\n"
+        "Sec-WebSocket-Protocol: AMQPWSB10\r\n"
         "Sec-WebSocket-Version: 13\r\n"
-        "\r\n\r\n";
+        "\r\n";
 
-    if (xio_send(wsio_instance->underlying_io, upgrade_request, sizeof(upgrade_request), NULL, NULL) != 0)
+    char upgrade_request[2048];
+    size_t len = sprintf(upgrade_request, upgrade_request_format, wsio_instance->hostname);
+
+    if (xio_send(wsio_instance->underlying_io, upgrade_request, len, NULL, NULL) != 0)
     {
         LogError("Error sending upgrade request");
     }
@@ -313,6 +327,11 @@ void wsio_destroy(CONCRETE_IO_HANDLE ws_io)
         (void)wsio_close(wsio_instance, NULL, NULL);
 
         list_destroy(wsio_instance->pending_io_list);
+
+        if (wsio_instance->hostname != NULL)
+        {
+            free(wsio_instance->hostname);
+        }
 
         free(ws_io);
     }

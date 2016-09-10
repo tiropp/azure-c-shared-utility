@@ -59,6 +59,7 @@ int main(int argc, void** argv)
             }
             else
             {
+                wsio_config.hostname = "iot-sdks-test.azure-devices.net";
                 wsio_config.underlying_io = tlsio;
 
                 const IO_INTERFACE_DESCRIPTION* wsio_interface = wsio_get_interface_description();
