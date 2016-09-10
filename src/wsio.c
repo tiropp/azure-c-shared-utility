@@ -172,7 +172,11 @@ static void on_underlying_io_open_complete(void* context, IO_OPEN_RESULT open_re
 {
     WSIO_INSTANCE* wsio_instance = (WSIO_INSTANCE*)context;
     (void)context, open_result;
-    const char upgrade_request[] = "GET /chat HTTP/1.1\r\n\r\n";
+    const char upgrade_request[] = "GET /chat HTTP/1.1\r\n"
+        "Upgrade: websocket\r\n"
+        "Connection: Upgrade\r\n"
+        "Sec-WebSocket-Version: 13\r\n"
+        "\r\n\r\n";
 
     if (xio_send(wsio_instance->underlying_io, upgrade_request, sizeof(upgrade_request), NULL, NULL) != 0)
     {
@@ -184,6 +188,7 @@ static void on_underlying_io_bytes_received(void* context, const unsigned char* 
 {
     (void)context, buffer, size;
     LogInfo("Received %zu bytes", size);
+    LogInfo("Received %s bytes", buffer);
 }
 
 static void on_underlying_io_error(void* context)
