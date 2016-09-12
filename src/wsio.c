@@ -8,6 +8,7 @@
 #include <stddef.h>
 #include <stdio.h>
 #include <stdbool.h>
+#include <stdint.h>
 #include "azure_c_shared_utility/gballoc.h"
 #include "azure_c_shared_utility/wsio.h"
 #include "azure_c_shared_utility/xlogging.h"
@@ -130,9 +131,118 @@ static int remove_pending_io(WSIO_INSTANCE* wsio_instance, LIST_ITEM_HANDLE item
     return result;
 }
 
-static send_pending_ios(WSIO_INSTANCE* wsio_instance)
+static void send_pending_ios(WSIO_INSTANCE* wsio_instance)
 {
+    LIST_ITEM_HANDLE first_pending_io;
 
+    first_pending_io = list_get_head_item(wsio_instance->pending_io_list);
+
+    if (first_pending_io != NULL)
+    {
+        PENDING_SOCKET_IO* pending_socket_io = (PENDING_SOCKET_IO*)list_item_get_value(first_pending_io);
+        if (pending_socket_io == NULL)
+        {
+            indicate_error(wsio_instance);
+        }
+        else
+        {
+            bool is_partially_sent = pending_socket_io->is_partially_sent;
+            size_t frame_length = 6;
+            if (pending_socket_io->size > 125)
+            {
+                frame_length += 2;
+            }
+            if (pending_socket_io->size > 65535)
+            {
+                frame_length += 6;
+            }
+
+            frame_length += pending_socket_io->size;
+
+            unsigned char* ws_buffer = (unsigned char*)malloc(frame_length);
+            if (ws_buffer == NULL)
+            {
+                if (pending_socket_io->on_send_complete != NULL)
+                {
+                    pending_socket_io->on_send_complete(pending_socket_io->callback_context, IO_SEND_ERROR);
+                }
+
+                if (is_partially_sent)
+                {
+                    indicate_error(wsio_instance);
+                }
+                else
+                {
+                    if (list_get_head_item(wsio_instance->pending_io_list) != NULL)
+                    {
+                        /* continue ... */
+                    }
+                }
+
+                if ((remove_pending_io(wsio_instance, first_pending_io, pending_socket_io) != 0) && !is_partially_sent)
+                {
+                    indicate_error(wsio_instance);
+                }
+            }
+            else
+            {
+                /* fill in frame */
+                size_t pos = 0;
+
+                ws_buffer[0] = (1 << 0) +
+                    (2 << 4);
+                ws_buffer[1] = (1 << 0);
+                if (pending_socket_io->size < 126)
+                {
+                    ws_buffer[1] |= (pending_socket_io->size << 1);
+                    pos = 2;
+                }
+                else if (pending_socket_io->size < 65536)
+                {
+                    ws_buffer[1] |= (126 << 1);
+                    ws_buffer[2] |= (pending_socket_io->size & 0xFF);
+                    ws_buffer[3] |= (pending_socket_io->size >> 8);
+                    pos = 4;
+                }
+                else
+                {
+                    ws_buffer[1] |= (127 << 1);
+                    ws_buffer[2] |= ((uint64_t)pending_socket_io->size & 0xFF);
+                    ws_buffer[3] |= ((uint64_t)pending_socket_io->size >> 8) & 0xFF;
+                    ws_buffer[4] |= ((uint64_t)pending_socket_io->size >> 16) & 0xFF;
+                    ws_buffer[5] |= ((uint64_t)pending_socket_io->size >> 24) & 0xFF;
+                    ws_buffer[6] |= ((uint64_t)pending_socket_io->size >> 32) & 0xFF;
+                    ws_buffer[7] |= ((uint64_t)pending_socket_io->size >> 40) & 0xFF;
+                    ws_buffer[8] |= ((uint64_t)pending_socket_io->size >> 48) & 0xFF;
+                    ws_buffer[9] |= ((uint64_t)pending_socket_io->size >> 56) & 0xFF;
+                    pos = 10;
+                }
+
+                /* mask key */
+                ws_buffer[pos++] = 0;
+                ws_buffer[pos++] = 0;
+                ws_buffer[pos++] = 0;
+                ws_buffer[pos++] = 0;
+
+                (void)memcpy(ws_buffer + pos, pending_socket_io->bytes, pending_socket_io->size);
+
+                if (xio_send(wsio_instance->underlying_io, ws_buffer, pos, pending_socket_io->on_send_complete, pending_socket_io->callback_context) != 0)
+                {
+                    indicate_error(wsio_instance);
+                }
+                else
+                {
+                    LogInfo("sent");
+                    if (remove_pending_io(wsio_instance, first_pending_io, pending_socket_io) != 0)
+                    {
+                        indicate_error(wsio_instance);
+                    }
+                }
+
+                free(ws_buffer);
+            }
+        }
+    }
 }
 
 CONCRETE_IO_HANDLE wsio_create(void* io_create_parameters)
@@ -230,38 +340,22 @@ static void on_underlying_io_bytes_received(void* context, const unsigned char* 
     }
     else
     {
-        size_t pos = 0;
-        size_t last_pos = 0;
-        unsigned char done = 0;
 
         wsio_instance->received_bytes = new_received_bytes;
         (void)memcpy(wsio_instance->received_bytes, buffer, size);
         wsio_instance->received_byte_count += size;
 
-        while (done == 0)
+        if (wsio_instance->io_state == IO_STATE_OPENING)
         {
-            /* parse the Upgrade */
-            while ((pos < wsio_instance->received_byte_count) &&
-                (wsio_instance->received_bytes[pos] != '\r'))
-            {
-                pos++;
-            }
+            size_t pos = 0;
+            size_t last_pos = 0;
+            unsigned char done = 0;
 
-            if (pos == wsio_instance->received_byte_count)
+            while (done == 0)
             {
-                break;
-            }
-
-            if (pos - last_pos == 0)
-            {
-                done = 1;
-            }
-            else
-            {
-                pos++;
-
+                /* parse the Upgrade */
                 while ((pos < wsio_instance->received_byte_count) &&
-                    (wsio_instance->received_bytes[pos] == '\n'))
+                    (wsio_instance->received_bytes[pos] != '\r'))
                 {
                     pos++;
                 }
@@ -271,16 +365,41 @@ static void on_underlying_io_bytes_received(void* context, const unsigned char* 
                     break;
                 }
 
-                last_pos = pos;
+                if (pos - last_pos == 0)
+                {
+                    done = 1;
+                }
+                else
+                {
+                    pos++;
+
+                    while ((pos < wsio_instance->received_byte_count) &&
+                        (wsio_instance->received_bytes[pos] == '\n'))
+                    {
+                        pos++;
+                    }
+
+                    if (pos == wsio_instance->received_byte_count)
+                    {
+                        break;
+                    }
+
+                    last_pos = pos;
+                }
+            }
+
+            if (done)
+            {
+                /* parsed the upgrade response ... we assume */
+                LogInfo("Got WS upgrade response");
+                wsio_instance->io_state = IO_STATE_OPEN;
+                indicate_open_complete(wsio_instance, IO_OPEN_OK);
             }
         }
 
-        if (done)
+        if (wsio_instance->io_state == IO_STATE_OPEN)
         {
-            /* parsed the upgrade response ... we assume */
-            LogInfo("Got WS upgrade response");
-            wsio_instance->io_state = IO_STATE_OPEN;
-            indicate_open_complete(wsio_instance, IO_OPEN_OK);
+            /* parse each frame */
         }
     }
 }
@@ -448,7 +567,7 @@ int wsio_send(CONCRETE_IO_HANDLE ws_io, const void* buffer, size_t size, ON_SEND
             else
             {
                 /* I guess send here */
-
+                send_pending_ios(wsio_instance);
 
                 result = 0;
             }

@@ -11,6 +11,9 @@ static void on_io_open_complete(void* context, IO_OPEN_RESULT open_result)
 {
     (void)context, open_result;
     (void)printf("Open complete called\r\n");
+
+    XIO_HANDLE wsio = (XIO_HANDLE)context;
+    xio_send(wsio, "Test", 4, NULL, NULL);
 }
 
 static void on_io_bytes_received(void* context, const unsigned char* buffer, size_t size)
