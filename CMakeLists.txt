@@ -98,7 +98,6 @@ if(${use_wsio})
         set(CMAKE_STATIC_LINKER_FLAGS "${CMAKE_STATIC_LINKER_FLAGS} /IGNORE:4006 /IGNORE:4221")
 
         remove_definitions(/WX)
-        add_subdirectory(deps/libwebsockets)
         add_definitions(/WX)
         set(CMAKE_EXE_LINKER_FLAGS ${CMAKE_EXE_LINKER_FLAGS_PREV})
         set(CMAKE_SHARED_LINKER_FLAGS ${CMAKE_SHARED_LINKER_FLAGS_PREV})
