@@ -219,12 +219,13 @@ static void send_pending_ios(WSIO_INSTANCE* wsio_instance)
                 }
 
                 /* mask key */
-                ws_buffer[pos++] = 0;
-                ws_buffer[pos++] = 0;
-                ws_buffer[pos++] = 0;
-                ws_buffer[pos++] = 0;
+                ws_buffer[pos++] = 0xFF;
+                ws_buffer[pos++] = 0xFF;
+                ws_buffer[pos++] = 0xFF;
+                ws_buffer[pos++] = 0xFF;
 
                 (void)memcpy(ws_buffer + pos, pending_socket_io->bytes, pending_socket_io->size);
+                pos += pending_socket_io->size;
 
                 if (xio_send(wsio_instance->underlying_io, ws_buffer, pos, pending_socket_io->on_send_complete, pending_socket_io->callback_context) != 0)
                 {
@@ -367,6 +368,14 @@ static void on_underlying_io_bytes_received(void* context, const unsigned char* 
 
                 if (pos - last_pos == 0)
                 {
+                    pos++;
+
+                    while ((pos < wsio_instance->received_byte_count) &&
+                        (wsio_instance->received_bytes[pos] == '\n'))
+                    {
+                        pos++;
+                    }
+
                     done = 1;
                 }
                 else
@@ -390,6 +399,13 @@ static void on_underlying_io_bytes_received(void* context, const unsigned char* 
 
             if (done)
             {
+                if (wsio_instance->received_byte_count - pos > 0)
+                {
+                    (void)memmove(wsio_instance->received_bytes, wsio_instance->received_bytes + pos, wsio_instance->received_byte_count - pos);
+                }
+
+                wsio_instance->received_byte_count -= pos;
+
                 /* parsed the upgrade response ... we assume */
                 LogInfo("Got WS upgrade response");
                 wsio_instance->io_state = IO_STATE_OPEN;
@@ -400,6 +416,46 @@ static void on_underlying_io_bytes_received(void* context, const unsigned char* 
         if (wsio_instance->io_state == IO_STATE_OPEN)
         {
             /* parse each frame */
+            /* check frame type */
+            uint64_t needed_bytes = 6;
+            if (wsio_instance->received_byte_count >= needed_bytes)
+            {
+                uint64_t payload_length = wsio_instance->received_bytes[1] & 0x7F;
+                if (payload_length == 126)
+                {
+                    needed_bytes += 2;
+                    if (wsio_instance->received_byte_count >= needed_bytes)
+                    {
+                        payload_length = wsio_instance->received_bytes[2];
+                        payload_length |= (uint16_t)wsio_instance->received_bytes[3] << 8;
+                    }
+                }
+                else if (payload_length == 127)
+                {
+                    needed_bytes += 8;
+                    if (wsio_instance->received_byte_count >= needed_bytes)
+                    {
+                        payload_length = wsio_instance->received_bytes[2];
+                        payload_length |= (uint64_t)wsio_instance->received_bytes[3] << 8;
+                        payload_length |= (uint64_t)wsio_instance->received_bytes[4] << 16;
+                        payload_length |= (uint64_t)wsio_instance->received_bytes[5] << 24;
+                        payload_length |= (uint64_t)wsio_instance->received_bytes[6] << 32;
+                        payload_length |= (uint64_t)wsio_instance->received_bytes[7] << 40;
+                        payload_length |= (uint64_t)wsio_instance->received_bytes[8] << 48;
+                        payload_length |= (uint64_t)wsio_instance->received_bytes[9] << 56;
+                    }
+                }
+
+                needed_bytes += payload_length;
+                if (wsio_instance->received_byte_count >= needed_bytes)
+                {
+                    unsigned char opcode = wsio_instance->received_bytes[0] >> 4;
+                    if (opcode == 2)
+                    {
+                        wsio_instance->on_bytes_received(wsio_instance->on_bytes_received_context, wsio_instance->received_bytes + needed_bytes - payload_length, (size_t)payload_length);
+                    }
+                }
+            }
         }
     }
 }
