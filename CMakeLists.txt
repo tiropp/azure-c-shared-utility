@@ -59,11 +59,18 @@ set (LIB_INSTALL_DIR lib CACHE PATH "Library object file directory")
 set_property(GLOBAL PROPERTY USE_FOLDERS ON)
 
 if(MSVC)
-    if (WINCE) # Be lax with WEC 2013 compiler
+    if (WINCE OR (MSVC AND ${MSVC_VERSION} LESS 1600)) # Be lax with WEC 2013 compiler
         set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} /W3")
         set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} /W3")
         # WEC 2013 uses older VS compiler. Build some files as C++ files to resolve C99 related compile issues
-        SET_SOURCE_FILES_PROPERTIES(src/consolelogger.c src/xlogging.c src/map.c adapters/uniqueid_win32.c adapters/httpapi_wince.c src/tlsio_schannel.c src/x509_schannel.c PROPERTIES LANGUAGE CXX)
+        SET(CompileAsCpp src/consolelogger.c src/xlogging.c src/map.c adapters/uniqueid_win32.c src/tlsio_schannel.c src/x509_schannel.c)
+        IF( WINCE )
+          LIST(APPEND CompileAsCpp adapters/httpapi_wince.c)
+        ELSE()
+          LIST(APPEND CompileAsCpp adapters/httpapi_winhttp.c)
+        ENDIF()
+        SET_SOURCE_FILES_PROPERTIES(${CompileAsCpp} PROPERTIES LANGUAGE CXX)
+        
         add_definitions(-DWIN32) #WEC 2013 
     ELSE()
         set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} /W4")
