@@ -32,6 +32,11 @@
 #include "azure_c_shared_utility/x509_schannel.h"
 #include "azure_c_shared_utility/crt_abstractions.h"
 
+#ifndef SCH_USE_STRONG_CRYPTO // Needs KB 2868725 which is only in Windows 7+
+# define SCH_USE_STRONG_CRYPTO                        0x00400000
+#endif
+
+
 typedef enum TLSIO_STATE_TAG
 {
     TLSIO_STATE_NOT_OPEN,
