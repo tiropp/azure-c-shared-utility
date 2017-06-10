@@ -6,7 +6,7 @@
 #include <limits.h>
 #include <ctype.h>
 #include <limits.h>
-#if MSVC_LE_1600
+#if MSVC_LESS_1600
 # include <stdio_ex.h>
 #endif
 #include "azure_c_shared_utility/gballoc.h"
