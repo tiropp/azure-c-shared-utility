@@ -39,6 +39,10 @@
 DEFINE_ENUM(TLSIO_STATE, TLSIO_STATE_VALUES);
 DEFINE_ENUM_STRINGS(TLSIO_STATE, TLSIO_STATE_VALUES);
 
+#ifndef SCH_USE_STRONG_CRYPTO // Needs KB 2868725 which is only in Windows 7+
+# define SCH_USE_STRONG_CRYPTO                        0x00400000
+#endif
+
 typedef struct PENDING_SEND_TAG
 {
     unsigned char* bytes;

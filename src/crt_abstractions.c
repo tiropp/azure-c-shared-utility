@@ -15,7 +15,7 @@
 #include "azure_c_shared_utility/crt_abstractions.h"
 
 
-#if defined (WINCE) || defined (TIZENRT)
+#if defined (WINCE) || defined (TIZENRT) || _MSC_VER < 1600
 #pragma warning(disable:4756) // warning C4756: overflow in constant arithmetic
 
 // These defines are missing in math.h for WEC2013 SDK

@@ -6,6 +6,11 @@
 #include <time.h>
 #include "azure_c_shared_utility/xlogging.h"
 
+
+#ifdef __cplusplus
+extern "C" {
+#endif /* __cplusplus */
+
 void consolelogger_log(LOG_CATEGORY log_category, const char* file, const char* func, const int line, unsigned int options, const char* format, ...)
 {
     va_list args;
@@ -34,3 +39,7 @@ void consolelogger_log(LOG_CATEGORY log_category, const char* file, const char* 
 		(void)printf("\r\n");
 	}
 }
+
+#ifdef __cplusplus
+}
+#endif /* __cplusplus */

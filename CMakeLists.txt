@@ -22,6 +22,11 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
     set(LINUX TRUE)
 endif()
 
+if (MSVC AND MSVC_VERSION LESS 1600)
+  set(MSVC_LE_1600 1)
+  add_definitions(-DMSVC_LE_1600)
+endif()
+
 include (CTest)
 
 #these are the include folders
@@ -34,6 +39,9 @@ include_directories(${SHARED_UTIL_INC_FOLDER})
 if (WINCE)
     include_directories(${SHARED_UTIL_INC_FOLDER}/azure_c_shared_utility/windowsce) #windowsce SDK doesn't have stdbool.h
 ENDIF()
+if (MSVC_LE_1600)
+  include_directories(${SHARED_UTIL_INC_FOLDER}/azure_c_shared_utility/msvc1500)
+endif()
 
 #the following variables are project-wide and can be used with cmake-gui
 option(run_unittests "set run_unittests to ON to run unittests (default is OFF)" OFF)
@@ -143,7 +151,7 @@ set (LIB_INSTALL_DIR lib CACHE PATH "Library object file directory")
 set_property(GLOBAL PROPERTY USE_FOLDERS ON)
 
 if(MSVC)
-    if (WINCE) # Be lax with WEC 2013 compiler
+    if (WINCE OR MSVC_LE_1600) # Be lax with WEC 2013 compiler
         set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} /W3")
         set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} /W3")
         # WEC 2013 uses older VS compiler. Build some files as C++ files to resolve C99 related compile issues
@@ -151,7 +159,11 @@ if(MSVC)
         if (${use_httpapi_compact})
             SET_SOURCE_FILES_PROPERTIES(adapters/httpapi_compact.c PROPERTIES LANGUAGE CXX)
         else()
+          if( WINCE )
             SET_SOURCE_FILES_PROPERTIES(adapters/httpapi_wince.c PROPERTIES LANGUAGE CXX)
+          elseif( MSVC_LE_1600 )
+            SET_SOURCE_FILES_PROPERTIES(adapters/httpapi_winhttp.c PROPERTIES LANGUAGE CXX)
+          endif()
         endif()
         add_definitions(-DWIN32) #WEC 2013
     ELSE()
