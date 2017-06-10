@@ -7,6 +7,9 @@
 #include <stdint.h>
 #include <limits.h>
 #include <stddef.h>
+#if MSVC_LE_1600
+# include <stdio_ex.h>
+#endif
 #include "azure_c_shared_utility/gballoc.h"
 #include "azure_c_shared_utility/xio.h"
 #include "azure_c_shared_utility/socketio.h"

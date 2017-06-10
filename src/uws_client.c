@@ -6,6 +6,9 @@
 #include <limits.h>
 #include <ctype.h>
 #include <limits.h>
+#if MSVC_LE_1600
+# include <stdio_ex.h>
+#endif
 #include "azure_c_shared_utility/gballoc.h"
 #include "azure_c_shared_utility/uws_client.h"
 #include "azure_c_shared_utility/optimize_size.h"
@@ -23,7 +26,6 @@
 #include "azure_c_shared_utility/gb_rand.h"
 #include "azure_c_shared_utility/base64.h"
 #include "azure_c_shared_utility/optionhandler.h"
-
 static const char* UWS_CLIENT_OPTIONS = "uWSClientOptions";
 
 /* Requirements not needed as they are optional:
