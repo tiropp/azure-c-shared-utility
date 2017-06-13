@@ -10,6 +10,9 @@
 #include <string.h>
 #include <stdarg.h>
 #include <stdio.h>
+#if MSVC_LESS_1600_WINCE
+# include <cstdlib>
+#endif
 
 //
 // PUT NO CLIENT LIBRARY INCLUDES BEFORE HERE

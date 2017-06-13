@@ -4,6 +4,9 @@
 #include "azure_c_shared_utility/gballoc.h"
 
 #include <time.h>
+#if defined(MSVC_LESS_1600_WINCE)
+# include <ctime>
+#endif
 #include "azure_c_shared_utility/agenttime.h"
 
 time_t get_time(time_t* p)

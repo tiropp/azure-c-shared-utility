@@ -331,6 +331,9 @@ ${TICKCOUTER_C_FILE}
 ${THREAD_C_FILE}
 ${UNIQUEID_C_FILE}
 )
+if( MSVC_LESS_1600_WINCE )
+  set_source_files_properties(adapters/agenttime.c PROPERTIES LANGUAGE CXX)
+endif()
 
 if(${use_http})
     set(source_c_files ${source_c_files}
@@ -339,6 +342,10 @@ if(${use_http})
         ./src/httpheaders.c
         ${HTTP_C_FILE}
     )
+    if( MSVC_LESS_1600_WINCE )
+      set_source_files_properties(./src/httpapiexsas.c PROPERTIES LANGUAGE CXX)
+    endif()
+
 endif()
 
 if(${use_schannel})

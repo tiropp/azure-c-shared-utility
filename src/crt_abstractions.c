@@ -10,6 +10,9 @@
 #include <float.h>
 #include <math.h>
 #include <errno.h>
+#if MSVC_LESS_1600_WINCE
+# include <cerrno>
+#endif
 #include "azure_c_shared_utility/gballoc.h"
 #include "azure_c_shared_utility/optimize_size.h"
 #include "azure_c_shared_utility/crt_abstractions.h"

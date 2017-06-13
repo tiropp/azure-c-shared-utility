@@ -9,6 +9,9 @@
 #if MSVC_LESS_1600
 # include <stdio_ex.h>
 #endif
+#if MSVC_LESS_1600_WINCE
+# include <cerrno>
+#endif
 #include "azure_c_shared_utility/gballoc.h"
 #include "azure_c_shared_utility/uws_client.h"
 #include "azure_c_shared_utility/optimize_size.h"

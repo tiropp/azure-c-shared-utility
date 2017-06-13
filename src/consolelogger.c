@@ -4,6 +4,9 @@
 #include <stdarg.h>
 #include <stdio.h>
 #include <time.h>
+#if MSVC_LESS_1600_WINCE
+# include <ctime>
+#endif
 #include "azure_c_shared_utility/xlogging.h"
 
 

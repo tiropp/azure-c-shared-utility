@@ -10,6 +10,9 @@
 #if MSVC_LESS_1600
 # include <stdio_ex.h>
 #endif
+#if MSVC_LESS_1600_WINCE
+# include <cerrno>
+#endif
 #include "azure_c_shared_utility/gballoc.h"
 #include "azure_c_shared_utility/xio.h"
 #include "azure_c_shared_utility/socketio.h"
