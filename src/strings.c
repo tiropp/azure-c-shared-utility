@@ -22,6 +22,12 @@
 #include "azure_c_shared_utility/optimize_size.h"
 #include "azure_c_shared_utility/xlogging.h"
 
+#if defined(MSVC_LESS_1600_WINCE)
+// However note that _vsnprintf in ce 5/7 does not work if the first argument,
+// the buffer == NULL!
+# define vsnprintf _vsnprintf
+#endif
+
 static const char hexToASCII[16] = { '0', '1', '2', '3', '4', '5', '6', '7', '8', '9', 'A', 'B', 'C', 'D', 'E', 'F' };
 
 typedef struct STRING_TAG
@@ -126,7 +132,7 @@ STRING_HANDLE STRING_construct_sprintf(const char* format, ...)
 {
     STRING* result;
     
-#ifdef ARDUINO_ARCH_ESP8266
+#if defined(ARDUINO_ARCH_ESP8266) || defined(MSVC_LESS_1600_WINCE)
     size_t maxBufSize = 512;
     char buf[512];
 #else
@@ -514,7 +520,7 @@ int STRING_sprintf(STRING_HANDLE handle, const char* format, ...)
 {
     int result;
     
-#ifdef ARDUINO_ARCH_ESP8266
+#if defined(ARDUINO_ARCH_ESP8266) || defined(MSVC_LESS_1600_WINCE)
     size_t maxBufSize = 512;
     char buf[512];
 #else
