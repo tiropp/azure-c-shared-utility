@@ -572,7 +572,7 @@ function(FindDllFromLib var libFile)
     get_filename_component(_libDir ${libFile} DIRECTORY)
 
     while(NOT ("${_libDir}" STREQUAL ""))
-        file(GLOB_RECURSE _dllList "${_libDir}/${_libName}.dll")
+        file(GLOB_RECURSE _dllList "${_libDir}/${_libName}*.dll")
         list(LENGTH _dllList _listLen)
         if(${_listLen} GREATER 0)
             list(GET _dllList 0 _dll)
