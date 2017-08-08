@@ -727,7 +727,14 @@ static void on_underlying_io_open_complete(void* context, IO_OPEN_RESULT open_re
                         "\r\n";
                     const char* base64_nonce_chars = STRING_c_str(base64_nonce);
 
-                    upgrade_request_length = snprintf(NULL, 0, upgrade_request_format,
+                  #if defined(ARDUINO_ARCH_ESP8266) || defined(MSVC_LESS_1600_WINCE)
+                    char buffer[512];
+                    size_t maxBufferSize = sizeof(buffer);
+                  #else
+                    char* buffer = NULL;
+                    size_t maxBufferSize = 0;
+                  #endif
+                    upgrade_request_length = snprintf(buffer, maxBufferSize, upgrade_request_format,
                         uws_client->resource_name,
                         uws_client->hostname,
                         uws_client->port,
