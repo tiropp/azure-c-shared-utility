@@ -298,7 +298,14 @@ static void on_underlying_io_open_complete(void* context, IO_OPEN_RESULT open_re
                     char* plain_auth_string_bytes;
 
                     /* Codes_SRS_HTTP_PROXY_IO_01_060: [ - The value of `Proxy-Authorization` shall be the constructed according to RFC 2617. ]*/
-                    int plain_auth_string_length = snprintf(NULL, 0, "%s:%s", http_proxy_io_instance->username, (http_proxy_io_instance->password == NULL) ? "" : http_proxy_io_instance->password);
+                  #if defined(ARDUINO_ARCH_ESP8266) || defined(MSVC_LESS_1600_WINCE)
+                    char buffer[512];
+                    size_t maxBufferSize = sizeof(buffer);
+                  #else
+                    char* buffer = NULL;
+                    size_t maxBufferSize = 0;
+                  #endif
+                    int plain_auth_string_length = snprintf(buffer, maxBufferSize, "%s:%s", http_proxy_io_instance->username, (http_proxy_io_instance->password == NULL) ? "" : http_proxy_io_instance->password);
 
                     if (plain_auth_string_length < 0)
                     {
@@ -358,6 +365,13 @@ static void on_underlying_io_open_complete(void* context, IO_OPEN_RESULT open_re
                     const char* auth_string_payload;
                     /* Codes_SRS_HTTP_PROXY_IO_01_075: [ The Request-URI portion of the Request-Line is always an 'authority' as defined by URI Generic Syntax [2], which is to say the host name and port number destination of the requested connection separated by a colon: ]*/
                     const char request_format[] = "CONNECT %s:%d HTTP/1.1\r\nHost:%s:%d%s%s\r\n\r\n";
+                  #if defined(ARDUINO_ARCH_ESP8266) || defined(MSVC_LESS_1600_WINCE)
+                    char buffer[512];
+                    size_t maxBufferSize = sizeof(buffer);
+                  #else
+                    char* buffer = NULL;
+                    size_t maxBufferSize = 0;
+                  #endif
 
                     if (http_proxy_io_instance->username != NULL)
                     {
@@ -369,7 +383,7 @@ static void on_underlying_io_open_complete(void* context, IO_OPEN_RESULT open_re
                     }
 
                     /* Codes_SRS_HTTP_PROXY_IO_01_059: [ - If `username` and `password` have been specified in the arguments passed to `http_proxy_io_create`, then the header `Proxy-Authorization` shall be added to the request. ]*/
-                    connect_request_length = snprintf(NULL, 0, request_format,
+                    connect_request_length = snprintf(buffer, maxBufferSize, request_format,
                         http_proxy_io_instance->hostname,
                         http_proxy_io_instance->port,
                         http_proxy_io_instance->hostname,
