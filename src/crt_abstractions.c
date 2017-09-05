@@ -12,6 +12,7 @@
 #include <errno.h>
 #if MSVC_LESS_1600_WINCE
 # include <cerrno>
+# include <climits>
 #endif
 #include "azure_c_shared_utility/gballoc.h"
 #include "azure_c_shared_utility/optimize_size.h"

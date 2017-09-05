@@ -19,6 +19,9 @@
 #include "azure_c_shared_utility/socketio.h"
 #include "windows.h"
 #include "sspi.h"
+#if defined(_WIN32_WCE) && _WIN32_WCE==0x500
+# include <schnlsp.h>
+#endif
 #include "schannel.h"
 #include "azure_c_shared_utility/optimize_size.h"
 #include "azure_c_shared_utility/xlogging.h"
@@ -293,7 +296,11 @@ static void send_client_hello(TLS_IO_INSTANCE* tls_io_instance)
     auth_data.dwMaximumCipherStrength = 0;
     auth_data.dwSessionLifespan = 0;
     auth_data.dwFlags = SCH_USE_STRONG_CRYPTO | SCH_CRED_NO_DEFAULT_CREDS;
+   #if defined(_WIN32_WCE) && _WIN32_WCE==0x500
+    // dwCredFormat does not exist in the version of this platform
+   #else
     auth_data.dwCredFormat = 0;
+   #endif
 
     status = AcquireCredentialsHandle(NULL, UNISP_NAME, SECPKG_CRED_OUTBOUND, NULL,
         &auth_data, NULL, NULL, &tls_io_instance->credential_handle, NULL);
